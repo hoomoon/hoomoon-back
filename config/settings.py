@@ -72,9 +72,8 @@ DATABASES = {
 AUTH_USER_MODEL = 'api.User'
 
 # 2) Configurações de CORS — ajuste as origens conforme seu Next.js
-CORS_ALLOWED_ORIGINS = [
-    'http://localhost:3000',
-]
+CORS_ALLOWED_ORIGINS = os.environ.get('ALLOWED_HOSTS')
+
 # se for usar cookies/Credentials:
 CORS_ALLOW_CREDENTIALS = True
 
