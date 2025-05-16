@@ -67,7 +67,9 @@ DATABASES = {
      'default': dj_database_url.config(
          default=os.environ.get('DATABASE_URL')
      )
- }
+}
+
+AUTH_USER_MODEL = 'api.User'
 
 # 2) Configurações de CORS — ajuste as origens conforme seu Next.js
 CORS_ALLOWED_ORIGINS = [
