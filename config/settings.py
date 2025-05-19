@@ -1,19 +1,17 @@
+# config/settings.py
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+from datetime import timedelta
 import dj_database_url
 
-# BASE_DIR já estava ali antes
 BASE_DIR = Path(__file__).resolve().parent.parent
-
-# 1) carrega variáveis do .env (assegure um arquivo .env na raiz do projeto)
 load_dotenv(BASE_DIR / '.env')
 
 SECRET_KEY = os.getenv('SECRET_KEY')
 if not SECRET_KEY:
     raise Exception("SECRET_KEY not set in .env")
 DEBUG = True
-ALLOWED_HOSTS = []
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -22,15 +20,16 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    # apps que você adiciona:
-    'corsheaders',                       # CORS
-    'rest_framework',                    # Django REST Framework
-    'rest_framework_simplejwt',          # JWT auth
-    'api',                               # sua app de API
- ]
+
+    # third-party apps
+    'corsheaders',
+    'rest_framework',
+
+    # local apps
+    'api',
+]
 
 MIDDLEWARE = [
-    # CORS deve vir o mais alto possível
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -46,12 +45,12 @@ ROOT_URLCONF = 'config.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [BASE_DIR / 'templates'],   # ou [] se não usar pasta custom
+        'DIRS': [BASE_DIR / 'templates'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
                 'django.template.context_processors.debug',
-                'django.template.context_processors.request',   # obrigatória pro admin
+                'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
             ],
@@ -60,37 +59,37 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'config.wsgi.application'
-
 STATIC_URL = '/static/'
 
 DATABASES = {
-     'default': dj_database_url.config(
-         default=os.environ.get('DATABASE_URL')
-     )
+    'default': dj_database_url.config(default=os.environ.get('DATABASE_URL'))
 }
 
 AUTH_USER_MODEL = 'api.User'
 
-# 2) Configurações de CORS — ajustar as origens conforme frontend
-# Hosts que o Django vai aceitar no header “Host”
+# CORS & cookies
 ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '').split(',')
-
-# Origem CORS — converte a string em lista
 raw_cors = os.environ.get('CORS_ALLOWED_ORIGINS', '')
-if raw_cors:
-    CORS_ALLOWED_ORIGINS = [origin.strip() for origin in raw_cors.split(',')]
-else:
-    CORS_ALLOWED_ORIGINS = []
-
-# se for usar cookies/Credentials:
+CORS_ALLOWED_ORIGINS = [o.strip() for o in raw_cors.split(',')] if raw_cors else []
 CORS_ALLOW_CREDENTIALS = True
+CSRF_TRUSTED_ORIGINS = ['http://localhost:3000']
 
-# 3) Configurações básicas do DRF  Simple JWT
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = True
+SESSION_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_SAMESITE = 'Lax'
+
+# Django REST Framework + JWT
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
+        'api.authentication.CookieJWTAuthentication',
     ),
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
     ),
+}
+
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=15),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
 }
