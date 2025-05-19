@@ -71,8 +71,16 @@ DATABASES = {
 
 AUTH_USER_MODEL = 'api.User'
 
-# 2) Configurações de CORS — ajuste as origens conforme seu Next.js
-CORS_ALLOWED_ORIGINS = os.environ.get('ALLOWED_HOSTS')
+# 2) Configurações de CORS — ajustar as origens conforme frontend
+# Hosts que o Django vai aceitar no header “Host”
+ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '').split(',')
+
+# Origem CORS — converte a string em lista
+raw_cors = os.environ.get('CORS_ALLOWED_ORIGINS', '')
+if raw_cors:
+    CORS_ALLOWED_ORIGINS = [origin.strip() for origin in raw_cors.split(',')]
+else:
+    CORS_ALLOWED_ORIGINS = []
 
 # se for usar cookies/Credentials:
 CORS_ALLOW_CREDENTIALS = True
