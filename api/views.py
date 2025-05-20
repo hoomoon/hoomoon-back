@@ -1,4 +1,5 @@
 # api/views.py
+# api/views.py
 from datetime import timedelta
 from django.conf import settings
 from django.utils.decorators import method_decorator
@@ -10,11 +11,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, viewsets
 from rest_framework.permissions import IsAuthenticated, AllowAny
-
-from .serializers import (
-    RegisterSerializer, UserSerializer,
-    PlanSerializer, DepositSerializer
-)
+from .serializers import RegisterSerializer, UserSerializer, PlanSerializer, DepositSerializer
 from .models import Plan, Deposit
 
 User = get_user_model()
@@ -29,32 +26,47 @@ class RegisterView(CreateAPIView):
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        user = serializer.save()
-        return serializer.to_response(user)
+        return serializer.to_response(serializer.save())
 
 @method_decorator(csrf_exempt, name='dispatch')
 class CookieTokenObtainPairView(TokenObtainPairView):
     def post(self, request, *args, **kwargs):
         res = super().post(request, *args, **kwargs)
         if res.status_code == status.HTTP_200_OK:
-            access = res.data['access']
-            refresh = res.data['refresh']
-            res.set_cookie('access_token', access, max_age=_secs(settings.SIMPLE_JWT['ACCESS_TOKEN_LIFETIME']), httponly=True, secure=True, samesite='Lax', path='/')
-            res.set_cookie('refresh_token', refresh, max_age=_secs(settings.SIMPLE_JWT['REFRESH_TOKEN_LIFETIME']), httponly=True, secure=True, samesite='Lax', path='/')
+            access, refresh = res.data['access'], res.data['refresh']
+            for name, token, lifetime in (
+                ('access_token', access, settings.SIMPLE_JWT['ACCESS_TOKEN_LIFETIME']),
+                ('refresh_token', refresh, settings.SIMPLE_JWT['REFRESH_TOKEN_LIFETIME']),
+            ):
+                res.set_cookie(
+                    name, token,
+                    max_age=_secs(lifetime),
+                    httponly=True,
+                    secure=not settings.DEBUG,
+                    samesite='None' if not settings.DEBUG else 'Lax',
+                    path='/'
+                )
             res.data = {'detail': 'Login successful'}
         return res
 
 @method_decorator(csrf_exempt, name='dispatch')
 class CookieTokenRefreshView(TokenRefreshView):
     def post(self, request, *args, **kwargs):
-        token = request.COOKIES.get('refresh_token')
-        if not token:
+        refresh = request.COOKIES.get('refresh_token')
+        if not refresh:
             return Response({'detail': 'Refresh token missing.'}, status=status.HTTP_401_UNAUTHORIZED)
-        request.data['refresh'] = token
+        request.data['refresh'] = refresh
         res = super().post(request, *args, **kwargs)
         if res.status_code == status.HTTP_200_OK:
-            access = res.data['access']
-            res.set_cookie('access_token', access, max_age=_secs(settings.SIMPLE_JWT['ACCESS_TOKEN_LIFETIME']), httponly=True, secure=True, samesite='Lax', path='/')
+            token = res.data['access']
+            res.set_cookie(
+                'access_token', token,
+                max_age=_secs(settings.SIMPLE_JWT['ACCESS_TOKEN_LIFETIME']),
+                httponly=True,
+                secure=not settings.DEBUG,
+                samesite='None' if not settings.DEBUG else 'Lax',
+                path='/'
+            )
             res.data = {'detail': 'Token refreshed'}
         return res
 
@@ -72,8 +84,7 @@ class UserProfileView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        serializer = UserSerializer(request.user)
-        return Response(serializer.data)
+        return Response(UserSerializer(request.user).data)
 
 class PlanViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Plan.objects.all()
