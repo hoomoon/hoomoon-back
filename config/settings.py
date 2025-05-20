@@ -1,5 +1,4 @@
 # config/settings.py
-# config/settings.py
 import os
 from pathlib import Path
 from dotenv import load_dotenv
@@ -13,7 +12,7 @@ SECRET_KEY = os.getenv('SECRET_KEY')
 if not SECRET_KEY:
     raise RuntimeError("SECRET_KEY not set")
 
-DEBUG = True
+DEBUG = os.getenv('DJANGO_DEBUG', 'False').lower() in ('true', '1', 'yes')
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -68,10 +67,16 @@ CORS_ALLOWED_ORIGINS = [
     o.strip() for o in os.getenv('CORS_ALLOWED_ORIGINS', '').split(',') if o
 ]
 CORS_ALLOW_CREDENTIALS = True
-CSRF_TRUSTED_ORIGINS = ['http://localhost:3000']
+CSRF_TRUSTED_ORIGINS = [
+    o.strip() for o in os.getenv('CSRF_TRUSTED_ORIGINS', '').split(',') if o
+]
 
-SESSION_COOKIE_SECURE = CSRF_COOKIE_SECURE = False
-SESSION_COOKIE_SAMESITE = CSRF_COOKIE_SAMESITE = 'Lax'
+SESSION_COOKIE_SECURE = os.getenv('SESSION_COOKIE_SECURE', 'False').lower() in ('true','1','yes')
+CSRF_COOKIE_SECURE = os.getenv('CSRF_COOKIE_SECURE', 'False').lower() in ('true','1','yes')
+COOKIE_SAMESITE = os.getenv('COOKIE_SAMESITE', 'Lax')
+
+SESSION_COOKIE_SAMESITE = COOKIE_SAMESITE
+CSRF_COOKIE_SAMESITE = COOKIE_SAMESITE
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
