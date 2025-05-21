@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
-# exit on error
+# build.sh — prepara seu Django antes do start
 set -o errexit
 
-poetry install
+# 1) instala suas dependências
+pip install -r requirements.txt
 
-python manage.py collectstatic --no-input
+# 2) migra o banco (vai usar a DATABASE_URL do env do Render)
 python manage.py migrate
+
+# 3) coleta todos os staticfiles para a pasta staticfiles/
+python manage.py collectstatic --noinput
