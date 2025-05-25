@@ -3,6 +3,7 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.utils import timezone
+from django.utils.crypto import get_random_string
 
 
 class UserManager(BaseUserManager):
@@ -39,8 +40,10 @@ class User(AbstractUser):
 
     def save(self, *args, **kwargs):
         if not self.referral_code:
-            slug = self.email.split('@')[0].upper()
-            self.referral_code = f"HOO-{slug}"
+            code = None
+            while not code or User.objects.filter(referral_code=code).exists():
+                code = f"HOO-{get_random_string(8).upper()}"
+            self.referral_code = code
         super().save(*args, **kwargs)
 
 
