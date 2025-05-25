@@ -8,7 +8,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = config('SECRET_KEY')
 
-DEBUG = config('DJANGO_DEBUG', default=False, cast=bool)
+DEBUG = config('DJANGO_DEBUG', cast=bool)
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -62,17 +62,18 @@ DATABASES = {
 
 AUTH_USER_MODEL = 'api.User'
 
-ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='', cast=Csv())
-CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='', cast=Csv())
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', cast=Csv())
+CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', cast=Csv())
 CORS_ALLOW_CREDENTIALS = True
-CSRF_TRUSTED_ORIGINS = config('CSRF_TRUSTED_ORIGINS', default='', cast=Csv())
+CSRF_TRUSTED_ORIGINS = config('CSRF_TRUSTED_ORIGINS', cast=Csv())
 
-SESSION_COOKIE_SECURE = config('SESSION_COOKIE_SECURE', default=False, cast=bool)
-CSRF_COOKIE_SECURE = config('CSRF_COOKIE_SECURE', default=False, cast=bool)
-COOKIE_SAMESITE = config('COOKIE_SAMESITE', default='Lax')
+SESSION_COOKIE_DOMAIN = config('COOKIE_DOMAIN')
+CSRF_COOKIE_DOMAIN = config('COOKIE_DOMAIN')
 
-SESSION_COOKIE_SAMESITE = COOKIE_SAMESITE
-CSRF_COOKIE_SAMESITE = COOKIE_SAMESITE
+SESSION_COOKIE_SECURE = config('COOKIE_SECURE', cast=bool)
+CSRF_COOKIE_SECURE = config('COOKIE_SECURE', cast=bool)
+SESSION_COOKIE_SAMESITE = config('COOKIE_SAMESITE', default='None')
+CSRF_COOKIE_SAMESITE = config('COOKIE_SAMESITE', default='None')
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (

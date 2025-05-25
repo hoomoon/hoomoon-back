@@ -44,12 +44,23 @@ class RegisterSerializer(serializers.ModelSerializer):
         refresh = RefreshToken.for_user(user)
         access = str(refresh.access_token)
         resp = Response({'detail': 'Cadastro e login bem-sucedidos'}, status=status.HTTP_201_CREATED)
-        resp.set_cookie('access_token', access,
-                        max_age=_secs(settings.SIMPLE_JWT['ACCESS_TOKEN_LIFETIME']),
-                        httponly=True, secure=True, samesite='Lax', path='/')
-        resp.set_cookie('refresh_token', str(refresh),
-                        max_age=_secs(settings.SIMPLE_JWT['REFRESH_TOKEN_LIFETIME']),
-                        httponly=True, secure=True, samesite='Lax', path='/')
+        common = {
+            'httponly': True,
+            'secure': True,
+            'samesite': 'None',
+            'domain': settings.SESSION_COOKIE_DOMAIN,
+            'path': '/',
+        }
+        resp.set_cookie(
+            'access_token', access,
+            max_age=_secs(settings.SIMPLE_JWT['ACCESS_TOKEN_LIFETIME']),
+            **common
+        )
+        resp.set_cookie(
+            'refresh_token', str(refresh),
+            max_age=_secs(settings.SIMPLE_JWT['REFRESH_TOKEN_LIFETIME']),
+            **common
+        )
         return resp
 
 
