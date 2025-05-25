@@ -1,18 +1,14 @@
 # config/settings.py
-import os
 from pathlib import Path
-from dotenv import load_dotenv
-from datetime import timedelta
+from decouple import config, Csv
 import dj_database_url
+from datetime import timedelta
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-load_dotenv(BASE_DIR / '.env')
 
-SECRET_KEY = os.getenv('SECRET_KEY')
-if not SECRET_KEY:
-    raise RuntimeError("SECRET_KEY not set")
+SECRET_KEY = config('SECRET_KEY')
 
-DEBUG = os.getenv('DJANGO_DEBUG', 'False').lower() in ('true', '1', 'yes')
+DEBUG = config('DJANGO_DEBUG', cast=bool)
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -57,26 +53,27 @@ TEMPLATES = [{
 WSGI_APPLICATION = 'config.wsgi.application'
 
 DATABASES = {
-  "default": dj_database_url.config(default=os.getenv("DATABASE_URL"), conn_max_age=600, ssl_require=True)
+  "default": dj_database_url.config(
+      default=config('DATABASE_URL'),
+      conn_max_age=600, 
+      ssl_require=not DEBUG
+      )
 }
 
 AUTH_USER_MODEL = 'api.User'
 
-ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '').split(',')
-CORS_ALLOWED_ORIGINS = [
-    o.strip() for o in os.getenv('CORS_ALLOWED_ORIGINS', '').split(',') if o
-]
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', cast=Csv())
+CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', cast=Csv())
 CORS_ALLOW_CREDENTIALS = True
-CSRF_TRUSTED_ORIGINS = [
-    o.strip() for o in os.getenv('CSRF_TRUSTED_ORIGINS', '').split(',') if o
-]
+CSRF_TRUSTED_ORIGINS = config('CSRF_TRUSTED_ORIGINS', cast=Csv())
 
-SESSION_COOKIE_SECURE = os.getenv('SESSION_COOKIE_SECURE', 'False').lower() in ('true','1','yes')
-CSRF_COOKIE_SECURE = os.getenv('CSRF_COOKIE_SECURE', 'False').lower() in ('true','1','yes')
-COOKIE_SAMESITE = os.getenv('COOKIE_SAMESITE', 'Lax')
+SESSION_COOKIE_DOMAIN = config('COOKIE_DOMAIN')
+CSRF_COOKIE_DOMAIN = config('COOKIE_DOMAIN')
 
-SESSION_COOKIE_SAMESITE = COOKIE_SAMESITE
-CSRF_COOKIE_SAMESITE = COOKIE_SAMESITE
+SESSION_COOKIE_SECURE = config('COOKIE_SECURE', cast=bool)
+CSRF_COOKIE_SECURE = config('COOKIE_SECURE', cast=bool)
+SESSION_COOKIE_SAMESITE = config('COOKIE_SAMESITE', default='None')
+CSRF_COOKIE_SAMESITE = config('COOKIE_SAMESITE', default='None')
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
