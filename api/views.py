@@ -2,6 +2,7 @@
 # api/views.py
 from datetime import timedelta
 from django.conf import settings
+from django.db.models import Sum
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from django.contrib.auth import get_user_model
@@ -12,7 +13,7 @@ from rest_framework.response import Response
 from rest_framework import status, viewsets
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from .serializers import RegisterSerializer, UserSerializer, PlanSerializer, DepositSerializer
-from .models import Plan, Deposit
+from .models import Plan, Deposit, Earning, Investment
 
 User = get_user_model()
 
@@ -98,3 +99,65 @@ class DepositViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
+
+class MyNetworkView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+
+        # Monta até 10 níveis de indicações
+        niveis = []
+        nivel_atual = [user]
+        for i in range(10):
+            # busca usuários cujo sponsor está no nível anterior
+            prox = list(User.objects.filter(sponsor__in=nivel_atual))
+            # soma total investido no nível
+            total_investido = Investment.objects \
+                .filter(user__in=prox, status='ACTIVE') \
+                .aggregate(soma=Sum('amount'))['soma'] or 0
+            indicados = []
+            for u in prox:
+                investido = Investment.objects \
+                    .filter(user=u, status='ACTIVE') \
+                    .aggregate(soma=Sum('amount'))['soma'] or 0
+                comissoes = Earning.objects \
+                    .filter(user=u, type='REFERRAL', status='CONFIRMED') \
+                    .aggregate(soma=Sum('amount'))['soma'] or 0
+                indicados.append({
+                    'id': u.referral_code,
+                    'nome': u.name,
+                    'valorInvestido': float(investido),
+                    'status': 'Ativo' if u.is_active else 'Inativo',
+                    'dataEntrada': u.date_joined.isoformat(),
+                    # assume-se que o plano ativo é o do último investimento
+                    'planoAtivo': (
+                        u.investments.order_by('-start_date').first().plan.name
+                        if u.investments.exists() else None
+                    ),
+                    'comissoesGeradas': float(comissoes),
+                })
+            niveis.append({
+                'id': i + 1,
+                'nome': f'Nível {i+1}',
+                'indicados': indicados,
+                'totalInvestido': float(total_investido),
+                # desbloqueio inicial apenas do nível 1 (cliente faz o resto via frontend com base no plano)
+                'desbloqueado': True if i == 0 else False,
+            })
+            nivel_atual = prox
+
+        # pega o último investimento do próprio user pra inferir o plano
+        ultima = user.investments.order_by('-start_date').first()
+        if ultima and ultima.plan and ultima.plan.name:
+            # Plan.name é algo como "HOO SILVER", "HOO GOLD" ou "HOO BLACK"
+            slug = ultima.plan.name.split()[-1].lower()   # "silver"|"gold"|"black"
+        else:
+            slug = "silver"  # todo mundo começa em silver
+
+        return Response({
+            'plano': slug,
+            'referral_code': user.referral_code,
+            'totalN1': niveis[0]['totalInvestido'],
+            'niveis': niveis,
+        })

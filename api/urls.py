@@ -1,9 +1,13 @@
 # api/urls.py
+from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import PlanViewSet, DepositViewSet
+from .views import PlanViewSet, DepositViewSet, MyNetworkView
 
 router = DefaultRouter()
 router.register(r'plans', PlanViewSet, basename='plan')
 router.register(r'deposits', DepositViewSet, basename='deposit')
 
-urlpatterns = router.urls
+urlpatterns = [
+    path('', include(router.urls)),
+    path('minha-rede/', MyNetworkView.as_view(), name='minha-rede'),
+]
