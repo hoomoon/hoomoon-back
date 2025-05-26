@@ -1,6 +1,7 @@
 # api/models.py
 
 from django.db import models
+from django.db.models import Q, UniqueConstraint
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.utils import timezone
 from django.utils.crypto import get_random_string
@@ -45,6 +46,15 @@ class User(AbstractUser):
                 code = f"HOO-{get_random_string(8).upper()}"
             self.referral_code = code
         super().save(*args, **kwargs)
+
+    class Meta:
+        constraints = [
+            UniqueConstraint(
+                fields=['cpf'],
+                condition=~Q(cpf=''),
+                name='unique_non_empty_cpf'
+            ),
+        ]
 
 
 class Plan(models.Model):

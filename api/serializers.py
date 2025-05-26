@@ -4,6 +4,7 @@ from django.conf import settings
 from rest_framework import serializers, status
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework.validators import UniqueValidator
 
 from .models import User, Plan, Deposit, Investment, Earning, OnchainTransaction
 
@@ -16,6 +17,16 @@ class RegisterSerializer(serializers.ModelSerializer):
     name = serializers.CharField(write_only=True)
     password = serializers.CharField(write_only=True)
     sponsor_code = serializers.CharField(write_only=True, required=False)
+    cpf = serializers.CharField(
+        allow_blank=True,
+        required=False,
+        validators=[
+            UniqueValidator(
+                queryset=User.objects.all(),
+                message="Este CPF já está em uso."
+            )
+        ]
+    )
 
     class Meta:
         model = User
