@@ -1,11 +1,11 @@
 # api/views.py
-# api/views.py
 from datetime import timedelta
 from django.conf import settings
 from django.db.models import Sum
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from django.contrib.auth import get_user_model
+from rest_framework.decorators import api_view, permission_classes
 from rest_framework.generics import CreateAPIView
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework.views import APIView
@@ -13,12 +13,21 @@ from rest_framework.response import Response
 from rest_framework import status, viewsets
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from .serializers import RegisterSerializer, UserSerializer, PlanSerializer, DepositSerializer
-from .models import Plan, Deposit, Earning, Investment
+from .models import Plan, Deposit, Earning, Investment, User
 
 User = get_user_model()
 
 def _secs(delta: timedelta) -> int:
     return int(delta.total_seconds())
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def sponsor_by_code(request, code):
+    try:
+        user = User.objects.get(referral_code=code)
+        return Response({'name': user.name})
+    except User.DoesNotExist:
+        return Response({'detail': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
 
 class RegisterView(CreateAPIView):
     permission_classes = [AllowAny]
