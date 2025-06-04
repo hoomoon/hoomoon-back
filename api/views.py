@@ -5,6 +5,7 @@ from django.urls import reverse
 from datetime import timedelta
 from django.conf import settings
 from django.db.models import Sum
+from django.db import transaction
 from django.http import HttpResponse
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
@@ -16,6 +17,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status, viewsets
 from rest_framework.permissions import IsAuthenticated, AllowAny
+from urllib.parse import urlencode
 from .serializers import RegisterSerializer, UserSerializer, PlanSerializer, DepositSerializer
 from .models import Plan, Deposit, Earning, Investment, User
 from .coinpayments_service import CoinPaymentsService
@@ -174,29 +176,30 @@ class CoinPaymentsIPNView(APIView):
     def post(self, request, *args, **kwargs):
         logger.info(f"Recebida notificação IPN da CoinPayments. Headers: {request.headers}. Body (primeiros 500 chars): {str(request.data)[:500]}")
         
-        raw_post_data = request.body.decode('utf-8') # Guardar para log em caso de erro de email
-        ipn_secret = settings.COINPAYMENTS_IPN_SECRET
-        merchant_id = settings.COINPAYMENTS_MERCHANT_ID
+        raw_post_data = urlencode(request.data)
         
-        hmac_from_request = request.headers.get('Hmac') 
-        if not hmac_from_request:
-            logger.warning("IPN recebido sem header HMAC. Rejeitando.")
-            return HttpResponse("HMAC header missing", status=400)
-            
-        import hmac
-        import hashlib
-        
-        hmac_signature = hmac.new(ipn_secret.encode('utf-8'), raw_post_data.encode('utf-8'), hashlib.sha512).hexdigest()
-
-        if not hmac.compare_digest(hmac_signature, hmac_from_request):
-            logger.warning(f"HMAC inválido para IPN. Recebido: {hmac_from_request}, Calculado: {hmac_signature}. Body: {raw_post_data}")
-            return HttpResponse("Invalid HMAC", status=403)
-            
-        if request.data.get('merchant') != merchant_id:
-            logger.warning(f"Merchant ID inválido para IPN. Esperado: {merchant_id}, Recebido: {request.data.get('merchant')}")
-            return HttpResponse("Invalid Merchant ID", status=400)
-
         try:
+            ipn_secret = settings.COINPAYMENTS_IPN_SECRET
+            merchant_id = settings.COINPAYMENTS_MERCHANT_ID
+            
+            hmac_from_request = request.headers.get('Hmac') 
+            if not hmac_from_request:
+                logger.warning("IPN recebido sem header HMAC. Rejeitando.")
+                return HttpResponse("HMAC header missing", status=400)
+                
+            import hmac
+            import hashlib
+            
+            hmac_signature = hmac.new(ipn_secret.encode('utf-8'), raw_post_data.encode('utf-8'), hashlib.sha512).hexdigest()
+
+            if not hmac.compare_digest(hmac_signature, hmac_from_request):
+                logger.warning(f"HMAC inválido para IPN. Recebido: {hmac_from_request}, Calculado: {hmac_signature}. Body: {raw_post_data}")
+                return HttpResponse("Invalid HMAC", status=403)
+                
+            if request.data.get('merchant') != merchant_id:
+                logger.warning(f"Merchant ID inválido para IPN. Esperado: {merchant_id}, Recebido: {request.data.get('merchant')}")
+                return HttpResponse("Invalid Merchant ID", status=400)
+
             deposit_id_str = request.data.get('custom')
             if not deposit_id_str or not deposit_id_str.isdigit():
                 logger.error(f"IPN recebido com 'custom' (deposit_id) inválido ou ausente: {deposit_id_str}")
@@ -223,19 +226,39 @@ class CoinPaymentsIPNView(APIView):
                 return HttpResponse("IPN already processed for this deposit or deposit is failed", status=200)
 
             previous_status = deposit.status
+            new_status = previous_status
+
             if payment_status >= 100 or payment_status == 2:
-                deposit.status = 'CONFIRMED'
+                new_status = 'CONFIRMED'
                 deposit.transaction_hash = txn_id_coinpayments
             elif payment_status == 1:
-                deposit.status = 'PAID'
+                new_status = 'PAID'
             elif payment_status < 0:
-                deposit.status = 'FAILED'
-            
-            if previous_status != deposit.status:
-                deposit.save()
-                logger.info(f"Depósito {deposit_id} atualizado de '{previous_status}' para '{deposit.status}'.")
-            else:
-                logger.info(f"Status IPN {payment_status} para deposit_id {deposit_id} não resultou em mudança de status (permanece '{deposit.status}').")
+                new_status = 'FAILED'
+
+            if previous_status != new_status:
+                if new_status == 'CONFIRMED':
+                    with transaction.atomic():
+                        d_to_update = Deposit.objects.select_for_update().get(pk=deposit.id)
+                        
+                        if d_to_update.status == 'CONFIRMED':
+                            logger.warning(f"Depósito {deposit_id} já estava confirmado dentro da transação. Abortando.")
+                            return HttpResponse("IPN already processed.", status=200)
+
+                        user_to_update = User.objects.select_for_update().get(pk=d_to_update.user.id)
+                        
+                        user_to_update.balance += d_to_update.amount
+                        user_to_update.save()
+                        
+                        d_to_update.status = 'CONFIRMED'
+                        d_to_update.transaction_hash = txn_id_coinpayments 
+                        d_to_update.save()
+                        
+                        logger.info(f"SALDO CREDITADO! Usuário: {user_to_update.email}, Valor: {d_to_update.amount}, Novo Saldo: {user_to_update.balance}")
+                else:
+                    deposit.status = new_status
+                    deposit.save()
+                    logger.info(f"Depósito {deposit_id} atualizado de '{previous_status}' para '{new_status}'.")
 
         except Deposit.DoesNotExist:
             logger.error(f"IPN recebido para deposit_id {request.data.get('custom')} não encontrado no banco de dados.", exc_info=True)

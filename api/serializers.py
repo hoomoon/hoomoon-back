@@ -78,7 +78,7 @@ class RegisterSerializer(serializers.ModelSerializer):
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ('id', 'name', 'email', 'phone', 'country', 'referral_code')
+        fields = ('id', 'name', 'email', 'phone', 'country', 'referral_code', 'balance')
 
 
 class PlanSerializer(serializers.ModelSerializer):

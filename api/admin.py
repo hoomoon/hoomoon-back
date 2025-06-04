@@ -9,13 +9,13 @@ from .models import User, Plan, Deposit, Investment, Earning, OnchainTransaction
 @admin.register(User)
 class UserAdmin(BaseUserAdmin):
     ordering = ('email',)
-    list_display = ('email', 'name', 'is_staff', 'is_active')
+    list_display = ('email', 'name', 'balance', 'is_staff', 'is_active')
     list_filter = ('is_staff', 'is_active', 'country')
     search_fields = ('email', 'name')
 
     fieldsets = (
         (None, {'fields': ('email', 'password')}),
-        (_('Personal Info'), {'fields': ('name', 'phone', 'country', 'cpf', 'referral_code', 'sponsor')}),
+        (_('Personal Info'), {'fields': ('name', 'phone', 'country', 'cpf', 'balance', 'referral_code', 'sponsor')}),
         (_('Permissions'), {'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions')}),
         (_('Important Dates'), {'fields': ('last_login', 'date_joined')}),
     )
@@ -25,6 +25,7 @@ class UserAdmin(BaseUserAdmin):
             'fields': ('email', 'name', 'password1', 'password2', 'is_staff', 'is_active'),
         }),
     )
+    readonly_fields = ('balance', 'last_login', 'date_joined', 'referral_code')
     filter_horizontal = ('groups', 'user_permissions')
 
 @admin.register(Deposit)

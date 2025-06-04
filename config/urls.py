@@ -8,6 +8,7 @@ from api.views import (
     LogoutView,
     UserProfileView,
 )
+from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -21,4 +22,9 @@ urlpatterns = [
 
     # Demais endpoints da app api
     path('api/', include('api.urls')),
+
+    # Documentação da API
+    path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
+    path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
+    path('api/redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
 ]
