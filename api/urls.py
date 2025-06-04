@@ -2,6 +2,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import PlanViewSet, DepositViewSet, MyNetworkView, sponsor_by_code
+from .views import check_email_exists, check_cpf_exists
 
 router = DefaultRouter()
 router.register(r'plans', PlanViewSet, basename='plan')
@@ -11,4 +12,6 @@ urlpatterns = [
     path('', include(router.urls)),
     path('minha-rede/', MyNetworkView.as_view(), name='minha-rede'),
     path('sponsor/<str:code>/', sponsor_by_code),
+    path('check-email/', check_email_exists, name='check-email'),
+    path('check-cpf/', check_cpf_exists, name='check-cpf'),
 ]

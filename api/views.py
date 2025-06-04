@@ -170,3 +170,33 @@ class MyNetworkView(APIView):
             'totalN1': niveis[0]['totalInvestido'],
             'niveis': niveis,
         })
+    
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def check_email_exists(request):
+    """Verifica se um e-mail já existe no banco de dados"""
+    email = request.data.get('email', '').lower().strip()
+    
+    if not email:
+        return Response({'error': 'E-mail é obrigatório'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    exists = User.objects.filter(email=email).exists()
+    return Response({'exists': exists})
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def check_cpf_exists(request):
+    """Verifica se um CPF já existe no banco de dados"""
+    cpf = request.data.get('cpf', '').strip()
+    
+    if not cpf:
+        return Response({'error': 'CPF é obrigatório'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Remove caracteres não numéricos
+    cpf = ''.join(filter(str.isdigit, cpf))
+    
+    if len(cpf) != 11:
+        return Response({'error': 'CPF deve ter 11 dígitos'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    exists = User.objects.filter(cpf=cpf).exists()
+    return Response({'exists': exists})
