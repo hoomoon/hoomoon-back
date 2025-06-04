@@ -27,6 +27,27 @@ class UserAdmin(BaseUserAdmin):
     )
     filter_horizontal = ('groups', 'user_permissions')
 
+@admin.register(Deposit)
+class DepositAdmin(admin.ModelAdmin):
+    # Campos que aparecerão na lista de depósitos
+    list_display = ('user', 'amount', 'method', 'status', 'created_at', 'coinpayments_txn_id')
+    # Opções de filtro na barra lateral direita
+    list_filter = ('status', 'method', 'created_at')
+    # Campos pelos quais você poderá pesquisar
+    search_fields = ('user__email', 'payment_address', 'coinpayments_txn_id', 'transaction_hash')
+    # Campos que não podem ser editados manualmente no admin
+    readonly_fields = ('user', 'created_at', 'coinpayments_txn_id', 'payment_address', 'qrcode_url', 'status_url', 'transaction_hash')
+    
+    # Organiza os campos na tela de edição do depósito
+    fieldsets = (
+        ('Informações Principais', {
+            'fields': ('user', 'amount', 'method', 'status', 'created_at')
+        }),
+        ('Dados do Gateway de Pagamento (CoinPayments)', {
+            'fields': ('coinpayments_txn_id', 'payment_address', 'qrcode_url', 'status_url', 'transaction_hash')
+        }),
+    )
+
 
 # registra os demais modelos de forma compacta
-admin.site.register((Plan, Deposit, Investment, Earning, OnchainTransaction))
+admin.site.register((Plan, Investment, Earning, OnchainTransaction))

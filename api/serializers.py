@@ -90,8 +90,15 @@ class PlanSerializer(serializers.ModelSerializer):
 class DepositSerializer(serializers.ModelSerializer):
     class Meta:
         model = Deposit
-        fields = ('id', 'user', 'method', 'amount', 'status', 'transaction_hash', 'created_at')
-        read_only_fields = ('user', 'status', 'created_at')
+        fields = (
+            'id', 'user', 'method', 'amount', 'status', 
+            'transaction_hash', 'created_at', 
+            'coinpayments_txn_id', 'payment_address', 'qrcode_url', 'status_url'
+        )
+        read_only_fields = (
+            'user', 'status', 'created_at',
+            'coinpayments_txn_id', 'payment_address', 'qrcode_url', 'status_url'
+        )
 
 
 class InvestmentSerializer(serializers.ModelSerializer):

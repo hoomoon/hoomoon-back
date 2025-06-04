@@ -73,12 +73,16 @@ class Plan(models.Model):
 
 class Deposit(models.Model):
     METHOD_CHOICES = (('USDT', 'USDT – BEP20'), ('PIX', 'PIX'))
-    STATUS_CHOICES = (('PENDING', 'Pending'), ('CONFIRMED', 'Confirmed'), ('FAILED', 'Failed'))
+    STATUS_CHOICES = (('PENDING', 'Pending'), ('PAID', 'Paid'), ('CONFIRMED', 'Confirmed'), ('FAILED', 'Failed'))
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='deposits')
     method = models.CharField(max_length=10, choices=METHOD_CHOICES)
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='PENDING')
+    coinpayments_txn_id = models.CharField(max_length=100, blank=True, null=True, unique=True)
+    payment_address = models.CharField(max_length=150, blank=True, null=True)
+    qrcode_url = models.URLField(blank=True, null=True)
+    status_url = models.URLField(blank=True, null=True)
     transaction_hash = models.CharField(max_length=100, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
