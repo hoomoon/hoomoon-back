@@ -8,21 +8,21 @@ from .models import User, Plan, Deposit, Investment, Earning, OnchainTransaction
 
 @admin.register(User)
 class UserAdmin(BaseUserAdmin):
-    ordering = ('email',)
-    list_display = ('email', 'name', 'balance', 'is_staff', 'is_active')
+    ordering = ('username',)
+    list_display = ('username', 'email', 'name', 'balance', 'is_staff', 'is_active')
     list_filter = ('is_staff', 'is_active', 'country')
-    search_fields = ('email', 'name')
+    search_fields = ('username', 'email', 'name')
 
     fieldsets = (
-        (None, {'fields': ('email', 'password')}),
-        (_('Personal Info'), {'fields': ('name', 'phone', 'country', 'cpf', 'balance', 'referral_code', 'sponsor')}),
+        (None, {'fields': ('username', 'password')}),
+        (_('Personal Info'), {'fields': ('name', 'email', 'phone', 'country', 'cpf', 'balance', 'referral_code', 'sponsor')}),
         (_('Permissions'), {'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions')}),
         (_('Important Dates'), {'fields': ('last_login', 'date_joined')}),
     )
     add_fieldsets = (
         (None, {
             'classes': ('wide',),
-            'fields': ('email', 'name', 'password1', 'password2', 'is_staff', 'is_active'),
+            'fields': ('username', 'name', 'email', 'password', 'password2', 'is_staff', 'is_active'),
         }),
     )
     readonly_fields = ('balance', 'last_login', 'date_joined', 'referral_code')
@@ -30,16 +30,11 @@ class UserAdmin(BaseUserAdmin):
 
 @admin.register(Deposit)
 class DepositAdmin(admin.ModelAdmin):
-    # Campos que aparecerão na lista de depósitos
     list_display = ('user', 'amount', 'method', 'status', 'created_at', 'coinpayments_txn_id')
-    # Opções de filtro na barra lateral direita
     list_filter = ('status', 'method', 'created_at')
-    # Campos pelos quais você poderá pesquisar
     search_fields = ('user__email', 'payment_address', 'coinpayments_txn_id', 'transaction_hash')
-    # Campos que não podem ser editados manualmente no admin
     readonly_fields = ('user', 'created_at', 'coinpayments_txn_id', 'payment_address', 'qrcode_url', 'status_url', 'transaction_hash')
     
-    # Organiza os campos na tela de edição do depósito
     fieldsets = (
         ('Informações Principais', {
             'fields': ('user', 'amount', 'method', 'status', 'created_at')
@@ -50,5 +45,4 @@ class DepositAdmin(admin.ModelAdmin):
     )
 
 
-# registra os demais modelos de forma compacta
 admin.site.register((Plan, Investment, Earning, OnchainTransaction))

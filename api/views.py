@@ -1,5 +1,6 @@
 # api/views.py
 import logging
+import re
 from django.core.mail import mail_admins
 from django.urls import reverse
 from datetime import timedelta
@@ -10,6 +11,7 @@ from django.http import HttpResponse
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from django.contrib.auth import get_user_model
+from drf_spectacular.utils import extend_schema
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.generics import CreateAPIView
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
@@ -291,7 +293,7 @@ class CoinPaymentsIPNView(APIView):
         logger.info(f"IPN para deposit_id {request.data.get('custom')} processado com sucesso.")
         return HttpResponse("IPN Processed", status=200)
 
-# ... (Resto das suas views: MyNetworkView, check_email_exists, check_cpf_exists) ...
+@extend_schema(summary="Retorna a rede de referência do usuário")
 class MyNetworkView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -339,6 +341,33 @@ class MyNetworkView(APIView):
             'totalN1': niveis[0]['totalInvestido'] if niveis else 0,
             'niveis': niveis,
         })
+    
+@extend_schema(
+    summary="Verificar Existência de Nome de Usuário",
+    request={'application/json': {'type': 'object', 'properties': {'username': {'type': 'string'}}}},
+    responses={
+        200: {'description': 'Indica se o nome de usuário existe.', 'examples': {'application/json': {'exists': False}}},
+        400: {'description': 'Nome de usuário não fornecido ou inválido (ex: muito curto, caracteres não permitidos).'}
+    },
+    tags=['Verificações de Usuário']
+)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def check_username_exists(request):
+    username_to_check = request.data.get('username', '').strip()
+
+    if not username_to_check:
+        return Response({'error': 'Nome de usuário é obrigatório'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if len(username_to_check) < 3:
+        return Response({'error': 'Nome de usuário deve ter pelo menos 3 caracteres.'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    if not re.match(r"^[a-z0-9_.]+$", username_to_check):
+        return Response({'error': "Nome de usuário pode conter apenas letras minúsculas, números, '_' e '.'."}, status=status.HTTP_400_BAD_REQUEST)
+
+    exists = User.objects.filter(username__iexact=username_to_check).exists()
+    
+    return Response({'exists': exists})
     
 @api_view(['POST'])
 @permission_classes([AllowAny])

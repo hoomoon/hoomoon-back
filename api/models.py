@@ -8,27 +8,34 @@ from django.utils.crypto import get_random_string
 
 
 class UserManager(BaseUserManager):
-    def create_user(self, email, name, password=None, **extra_fields):
-        if not email:
-            raise ValueError("Email obrigatório")
-        email = self.normalize_email(email)
-        user = self.model(email=email, name=name, **extra_fields)
+    def create_user(self, username, name, password=None, email=None, **extra_fields):
+        if not username:
+            raise ValueError("O nome de usuário (username) é obrigatório")
+        if not name:
+            raise ValueError("O nome é obrigatório")
+        if email:
+            email = self.normalize_email(email)
+
+        user = self.model(username=username, name=name, email=email, **extra_fields)
         user.set_password(password)
         user.save(using=self._db)
         return user
 
-    def create_superuser(self, email, name, password=None, **extra_fields):
+    def create_superuser(self, username, name, password=None, email=None, **extra_fields):
         extra_fields.setdefault('is_staff', True)
         extra_fields.setdefault('is_superuser', True)
-        if not extra_fields['is_staff'] or not extra_fields['is_superuser']:
-            raise ValueError('Superuser precisa ter is_staff e is_superuser True.')
-        return self.create_user(email, name, password, **extra_fields)
+
+        if not extra_fields.get('is_staff'):
+            raise ValueError('Superuser precisa ter is_staff=True.')
+        if not extra_fields.get('is_superuser'):
+            raise ValueError('Superuser precisa ter is_superuser=True.')
+        
+        return self.create_user(username, name, password, email, **extra_fields)
 
 
 class User(AbstractUser):
-    username = None
     name = models.CharField(max_length=150)
-    email = models.EmailField(unique=True)
+    email = models.EmailField(unique=True, null=True, blank=True)
     phone = models.CharField(max_length=20, blank=True)
     country = models.CharField(max_length=100, blank=True)
     cpf = models.CharField(max_length=14, blank=True)
@@ -37,8 +44,8 @@ class User(AbstractUser):
     balance = models.DecimalField(max_digits=12, decimal_places=2, default=0.00, verbose_name="Saldo Disponível")
 
     objects = UserManager()
-    USERNAME_FIELD = 'email'
-    REQUIRED_FIELDS = ['name']
+    USERNAME_FIELD = 'username'
+    REQUIRED_FIELDS = ['name', 'email']
 
     def save(self, *args, **kwargs):
         if not self.referral_code:
@@ -56,6 +63,9 @@ class User(AbstractUser):
                 name='unique_non_empty_cpf'
             ),
         ]
+    
+    def __str__(self):
+        return self.username
 
 
 class Plan(models.Model):

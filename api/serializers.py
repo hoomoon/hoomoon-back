@@ -14,9 +14,21 @@ def _secs(delta: timedelta) -> int:
 
 
 class RegisterSerializer(serializers.ModelSerializer):
+    username = serializers.CharField(write_only=True, required=True,
+                                   validators=[UniqueValidator(queryset=User.objects.all(), message="Este nome de usuário já está em uso.")])
     name = serializers.CharField(write_only=True)
     password = serializers.CharField(write_only=True)
     sponsor_code = serializers.CharField(write_only=True, required=False)
+    email = serializers.EmailField(
+        required=False, allow_null=True, allow_blank=True,
+        validators=[
+            UniqueValidator(
+                queryset=User.objects.all(),
+                message="Este email já está em uso.",
+                lookup='iexact'
+            )
+        ]
+    )
     cpf = serializers.CharField(
         allow_blank=True,
         required=False,
@@ -30,25 +42,32 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ('name', 'email', 'password', 'phone', 'country', 'cpf', 'sponsor_code')
+        fields = ('username', 'name', 'email', 'password', 'phone', 'country', 'cpf', 'sponsor_code')
 
-    def validate_email(self, value):
-        if User.objects.filter(email=value).exists():
-            raise serializers.ValidationError('Email já cadastrado.')
-        return value
+    # def validate_email(self, value):
+    #     if User.objects.filter(email=value).exists():
+    #         raise serializers.ValidationError('Email já cadastrado.')
+    #     return value
 
     def create(self, validated_data):
+        username = validated_data.pop('username')
         name = validated_data.pop('name')
-        sponsor = validated_data.pop('sponsor_code', None)
+        email = validated_data.pop('email', None)
+        sponsor_code = validated_data.pop('sponsor_code', None)
         password = validated_data.pop('password')
-        user = User(name=name, **validated_data)
-        if sponsor:
+        user = User.objects.create_user(
+            username=username,
+            name=name,
+            email=email,
+            password=password,
+            **validated_data
+        )
+        if sponsor_code:
             try:
-                user.sponsor = User.objects.get(referral_code=sponsor)
+                user.sponsor = User.objects.get(referral_code=sponsor_code)
+                user.save(update_fields=['sponsor'])
             except User.DoesNotExist:
                 raise serializers.ValidationError({'sponsor_code': 'Código inválido.'})
-        user.set_password(password)
-        user.save()
         return user
 
     def to_response(self, user):
