@@ -135,7 +135,9 @@ class PlanSerializer(serializers.ModelSerializer):
             daily_reward_display = f"{int(obj.daily_percent)}%" if obj.daily_percent % 1 == 0 else f"{obj.daily_percent:.2f}%"
             feature_list.append(f"Recompensa diária: até {daily_reward_display}")
             
-            feature_list.append("Saques diários")
+            if obj.withdrawal_policy:
+                feature_list.append(obj.withdrawal_policy)
+                
         if obj.description:
             feature_list.append(obj.description)
             

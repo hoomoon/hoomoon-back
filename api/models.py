@@ -102,6 +102,12 @@ class Plan(models.Model):
     daily_percent = models.DecimalField(max_digits=5, decimal_places=2, verbose_name=_("Daily Yield Percentage"))
     duration_days = models.PositiveIntegerField(verbose_name=_("Duration in Days"))
     cap_percent = models.DecimalField(max_digits=5, decimal_places=2, verbose_name=_("Yield Cap Percentage"))
+    withdrawal_policy = models.CharField(
+        max_length=100, 
+        blank=True,
+        help_text=_("Descreva a política de saque. Ex: 'Saques diários', 'Saques semanais', etc."),
+        verbose_name=_("Política de Saque")
+    )
 
     def __str__(self):
         return self.name
