@@ -4,7 +4,7 @@ from rest_framework.routers import DefaultRouter # type: ignore
 from .views import (
     PlanViewSet, DepositViewSet, MyNetworkView, CoinPaymentsIPNView,
     check_email_exists, check_cpf_exists, sponsor_by_code, check_username_exists,
-    FreePlanActivateView, InitiateDepositView,
+    FreePlanActivateView, InitiateDepositView, ConnectPayWebhookView 
 )
 
 router = DefaultRouter()
@@ -15,6 +15,7 @@ urlpatterns = [
     path('', include(router.urls)),
     path('minha-rede/', MyNetworkView.as_view(), name='minha-rede'),
     path('coinpayments-ipn/', CoinPaymentsIPNView.as_view(), name='coinpayments-ipn'),
+    path('connectpay-webhook/', ConnectPayWebhookView.as_view(), name='connectpay_webhook'),
 
     # Investments
     path('investments/plans/free/activate/', FreePlanActivateView.as_view(), name='free_plan_activate'),
