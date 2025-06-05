@@ -244,30 +244,55 @@ class CoinPaymentsIPNView(APIView):
             if previous_status != new_status:
                 if new_status == 'CONFIRMED':
                     with transaction.atomic():
-                        d_to_update = Deposit.objects.select_for_update().get(pk=deposit.id)
+                        d_to_update = Deposit.objects.select_for_update().select_related('user', 'plan').get(pk=deposit.id)
                         
                         if d_to_update.status == 'CONFIRMED':
-                            logger.warning(f"Depósito {deposit_id} já estava confirmado dentro da transação. Abortando.")
-                            return HttpResponse("IPN already processed.", status=200)
+                            logger.warning(f"Depósito {deposit_id} já estava confirmado ao entrar na transação atômica. Abortando.")
+                            return HttpResponse("IPN already processed (race condition check).", status=200)
 
                         user_to_update = User.objects.select_for_update().get(pk=d_to_update.user.id)
                         
                         user_to_update.balance += d_to_update.amount
-                        user_to_update.save()
+                        user_to_update.save(update_fields=['balance'])
                         
                         d_to_update.status = 'CONFIRMED'
-                        d_to_update.transaction_hash = txn_id_coinpayments 
+                        d_to_update.coinpayments_txn_id = d_to_update.coinpayments_txn_id or txn_id_coinpayments
                         d_to_update.save()
                         
-                        logger.info(f"SALDO CREDITADO! Usuário: {user_to_update.email}, Valor: {d_to_update.amount}, Novo Saldo: {user_to_update.balance}")
+                        logger.info(f"SALDO CREDITADO! Usuário: {user_to_update.username}, Valor: {d_to_update.amount}, Novo Saldo: {user_to_update.balance}")
+
+                        if d_to_update.plan:
+                            if not Investment.objects.filter(deposit_source=d_to_update).exists():
+                                try:
+                                    new_investment = Investment.objects.create(
+                                        user=user_to_update,
+                                        plan=d_to_update.plan,
+                                        amount=d_to_update.amount,
+                                        deposit_source=d_to_update,
+                                        status='ACTIVE'
+                                    )
+                                    logger.info(f"INVESTIMENTO CRIADO E ATIVADO! Usuário: {user_to_update.username}, Plano: {d_to_update.plan.name}, "
+                                                f"Valor: {new_investment.amount}, Código Invest: {new_investment.code}, Depósito ID: {d_to_update.id}")
+                                except Exception as e_inv:
+                                    logger.error(f"FALHA CRÍTICA ao criar investimento para Depósito ID {d_to_update.id} "
+                                                 f"após confirmação. Usuário: {user_to_update.username}. Erro: {e_inv}", exc_info=True)
+                            else:
+                                logger.warning(f"Investimento para Depósito ID {d_to_update.id} já existe. Não será criado novamente.")
+                        else:
+                            logger.info(f"Depósito ID {d_to_update.id} confirmado, mas não está associado a nenhum plano. Nenhum investimento será criado.")
                 else:
                     deposit.status = new_status
+                    if new_status == 'FAILED' and txn_id_coinpayments:
+                         deposit.coinpayments_txn_id = deposit.coinpayments_txn_id or txn_id_coinpayments
                     deposit.save()
                     logger.info(f"Depósito {deposit_id} atualizado de '{previous_status}' para '{new_status}'.")
 
         except Deposit.DoesNotExist:
             logger.error(f"IPN recebido para deposit_id {request.data.get('custom')} não encontrado no banco de dados.", exc_info=True)
             return HttpResponse("Deposit not found", status=404)
+        except User.DoesNotExist:
+            logger.error(f"Usuário associado ao Deposit ID {deposit_id} não encontrado.", exc_info=True)
+            return HttpResponse("User not found for deposit", status=404)
         except ValueError as ve:
             logger.error(f"Erro de valor ao processar IPN (custom ou status inválido). Custom: {request.data.get('custom')}, Status: {request.data.get('status')}. Erro: {ve}", exc_info=True)
             return HttpResponse("Invalid data in IPN (custom or status field).", status=400)
