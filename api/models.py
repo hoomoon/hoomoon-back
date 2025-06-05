@@ -36,9 +36,9 @@ class UserManager(BaseUserManager):
 class User(AbstractUser):
     name = models.CharField(max_length=150)
     email = models.EmailField(unique=True, null=True, blank=True)
-    phone = models.CharField(max_length=20, blank=True)
-    country = models.CharField(max_length=100, blank=True)
-    cpf = models.CharField(max_length=14, blank=True)
+    phone = models.CharField(max_length=20, blank=True, null=True)
+    country = models.CharField(max_length=100, blank=True, null=True)
+    cpf = models.CharField(max_length=14, blank=True, null=True)
     referral_code = models.CharField(max_length=20, unique=True)
     sponsor = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL, related_name='referrals')
     balance = models.DecimalField(max_digits=12, decimal_places=2, default=0.00, verbose_name="Saldo Disponível")
