@@ -1,5 +1,6 @@
 # api/serializers.py
 from datetime import timedelta
+from decimal import Decimal
 from django.conf import settings
 from rest_framework import serializers, status
 from rest_framework.response import Response
@@ -195,3 +196,40 @@ class OnchainTransactionSerializer(serializers.ModelSerializer):
         model = OnchainTransaction
         fields = ('id', 'user', 'tx_type', 'status', 'tx_hash', 'value', 'fee', 'timestamp', 'notes')
         read_only_fields = ('user', 'timestamp')
+
+class InitiateDepositPayloadSerializer(serializers.Serializer):
+    planId = serializers.PrimaryKeyRelatedField(
+        queryset=Plan.objects.all(),
+        source='plan',
+        help_text=("ID do plano selecionado (e.g., PANDORA, TITAN).")
+    )
+    amount = serializers.DecimalField(
+        max_digits=12, 
+        decimal_places=2,
+        help_text=("Valor do depósito/investimento.")
+    )
+    paymentMethod = serializers.ChoiceField(
+        choices=Deposit.METHOD_CHOICES,
+        help_text=("Método de pagamento selecionado ('USDT_BEP20' ou 'PIX').")
+    )
+
+    def validate_planId(self, plan):
+        if plan.id == Plan.HOO_FREE:
+            raise serializers.ValidationError("O plano gratuito não requer depósito. Selecione um plano pago.")
+        return plan
+
+    def validate_amount(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("O valor do depósito deve ser positivo.")
+        return value
+
+    def validate(self, data):
+        plan = data.get('plan')
+        amount = data.get('amount')
+
+        if plan and amount is not None:
+            if amount < plan.min_value:
+                raise serializers.ValidationError({
+                    "amount": f"O valor do depósito (R${amount}) é inferior ao mínimo exigido para o plano {plan.name} (R${plan.min_value})."
+                })
+        return data

@@ -10,9 +10,10 @@ from django.db import transaction
 from django.http import HttpResponse
 from django.utils import timezone
 from django.utils.decorators import method_decorator
+from django.utils.translation import gettext_lazy as _
 from django.views.decorators.csrf import csrf_exempt
 from django.contrib.auth import get_user_model
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import extend_schema, OpenApiResponse
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.generics import CreateAPIView
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
@@ -21,7 +22,8 @@ from rest_framework.response import Response
 from rest_framework import status, viewsets
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from urllib.parse import urlencode
-from .serializers import RegisterSerializer, UserSerializer, PlanSerializer, DepositSerializer
+from .serializers import (RegisterSerializer, UserSerializer, PlanSerializer, DepositSerializer, 
+                          InitiateDepositPayloadSerializer)
 from .models import Plan, Deposit, Earning, Investment, User
 from .coinpayments_service import CoinPaymentsService
 
@@ -444,5 +446,143 @@ class FreePlanActivateView(APIView):
             logger.error(f"Erro ao ativar plano gratuito para {user.username}: {e}", exc_info=True)
             return Response(
                 {"detail": "Ocorreu um erro ao tentar ativar o plano. Tente novamente mais tarde."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        
+class InitiateDepositView(APIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = InitiateDepositPayloadSerializer
+
+    @extend_schema(
+        request=InitiateDepositPayloadSerializer,
+        summary="Inicia um processo de depósito para um plano pago.",
+        responses={
+            201: OpenApiResponse(description="Detalhes do depósito para pagamento.", examples={
+                "application/json (USDT)": {
+                    "depositId": "some-uuid-or-id",
+                    "planName": "Plano HOO TITAN",
+                    "amount": 100.00,
+                    "paymentMethod": "USDT_BEP20",
+                    "usdtWalletAddress": "YOUR_WALLET_ADDRESS_HERE",
+                    "usdtNetwork": "BEP20 (BSC)",
+                    "usdtQrCode": "URL_OR_DATA_FOR_QR_CODE",
+                    "instructionMessage": "Envie exatamente 100.00 USDT (BEP20) para o endereço fornecido."
+                },
+                "application/json (PIX)": {
+                    "depositId": "some-uuid-or-id",
+                    "planName": "Plano HOO PANDORA",
+                    "amount": 50.00,
+                    "paymentMethod": "PIX",
+                    "pixKey": "SUA_CHAVE_PIX_AQUI (ex: email, cpf, telefone, aleatória)",
+                    "pixKeyType": "email",
+                    "beneficiaryName": "Nome do Beneficiário Hoomoon",
+                    "pixQrCodePayload": "BR_CODE_COPIA_E_COLA_AQUI",
+                    "instructionMessage": "Faça uma transferência PIX de R$50.00 para a chave fornecida ou use o QR Code."
+                }
+            }),
+            400: OpenApiResponse(description="Erro de validação (ex: valor abaixo do mínimo, plano inválido)."),
+            401: OpenApiResponse(description="Não autenticado."),
+        }
+    )
+    def post(self, request, *args, **kwargs):
+        serializer = self.serializer_class(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        validated_data = serializer.validated_data
+        user = request.user
+        plan = validated_data['plan']
+        amount = validated_data['amount']
+        payment_method = validated_data['paymentMethod']
+
+        try:
+            with transaction.atomic():
+                deposit = Deposit.objects.create(
+                    user=user,
+                    plan=plan,
+                    amount=amount,
+                    method=payment_method,
+                    status='PENDING'
+                )
+                logger.info(f"Intenção de depósito ID {deposit.id} criada para usuário {user.username}, Plano {plan.name}, Valor {amount}, Método {payment_method}.")
+
+                if payment_method == 'USDT_BEP20':
+                    service = CoinPaymentsService()
+                    ipn_url = request.build_absolute_uri(reverse('coinpayments-ipn'))
+                    
+                    cp_transaction = service.create_transaction(
+                        amount=float(deposit.amount),
+                        user_email=user.email or f"user{user.id}@placeholder.com",
+                        ipn_url=ipn_url,
+                        deposit_id=deposit.id 
+                    )
+
+                    if not cp_transaction or cp_transaction.get('error') != 'ok':
+                        error_message = cp_transaction.get('error') if cp_transaction else "Erro desconhecido na CoinPayments"
+                        logger.error(f"Falha ao criar transação CoinPayments para Depósito ID {deposit.id}: {error_message}")
+                        deposit.status = 'FAILED'
+                        deposit.save()
+                        return Response(
+                            {"detail": _(f"Falha na comunicação com o gateway de pagamento: {error_message}")},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+                    
+                    result = cp_transaction['result']
+                    deposit.coinpayments_txn_id = result['txn_id']
+                    deposit.payment_address = result['address']
+                    deposit.qrcode_url = result['qrcode_url']
+                    deposit.status_url = result['status_url']
+                    deposit.save()
+
+                    response_data = {
+                        "depositId": str(deposit.id),
+                        "planName": plan.name,
+                        "amount": deposit.amount,
+                        "paymentMethod": "usdt_bep20",
+                        "usdtWalletAddress": deposit.payment_address,
+                        "usdtNetwork": "BEP20 (BSC)",
+                        "usdtQrCode": deposit.qrcode_url,
+                        "instructionMessage": _(f"Envie exatamente {deposit.amount} USDT (rede BEP20) para o endereço fornecido. Transação ID: {deposit.coinpayments_txn_id}")
+                    }
+                    return Response(response_data, status=status.HTTP_201_CREATED)
+
+                elif payment_method == 'PIX':
+                    deposit.pix_key = settings.PIX_STATIC_KEY # Ex: '000.000.000-00' ou chave aleatória
+                    deposit.pix_key_type = settings.PIX_STATIC_KEY_TYPE # Ex: 'cpf', 'random'
+                    deposit.pix_beneficiary_name = settings.PIX_BENEFICIARY_NAME # Ex: "Hoomoon LTDA"
+                    
+                    deposit.pix_qr_code_payload = f"BRCODE_PAYLOAD_PARA_DEPOSITO_{deposit.id}_VALOR_{deposit.amount}"
+                    deposit.save()
+                    
+                    response_data = {
+                        "depositId": str(deposit.id),
+                        "planName": plan.name,
+                        "amount": deposit.amount,
+                        "paymentMethod": "pix",
+                        "pixKey": deposit.pix_key,
+                        "pixKeyType": deposit.pix_key_type,
+                        "beneficiaryName": deposit.pix_beneficiary_name,
+                        "pixQrCodePayload": deposit.pix_qr_code_payload,
+                        "instructionMessage": _(f"Faça uma transferência PIX de R${deposit.amount} para a chave '{deposit.pix_key}' ({deposit.pix_key_type}) em nome de '{deposit.pix_beneficiary_name}', ou use o Copia e Cola.")
+                    }
+                    return Response(response_data, status=status.HTTP_201_CREATED)
+                
+                else:
+                    logger.warning(f"Método de pagamento '{payment_method}' não suportado para Depósito ID {deposit.id}.")
+                    deposit.status = 'FAILED'
+                    deposit.save()
+                    return Response(
+                        {"detail": _("Método de pagamento não suportado.")},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+        except serializers.ValidationError as e:
+            return Response(e.detail, status=status.HTTP_400_BAD_REQUEST)
+        except Plan.DoesNotExist:
+            return Response({"detail": _("Plano selecionado não encontrado.")}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            logger.error(f"Erro ao iniciar depósito para usuário {user.username}: {e}", exc_info=True)
+            return Response(
+                {"detail": _("Ocorreu um erro interno ao processar sua solicitação de depósito.")},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
