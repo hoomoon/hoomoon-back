@@ -124,7 +124,14 @@ class Deposit(models.Model):
         ('FAILED', _('Failed')),
         ('EXPIRED', _('Expired')),
     )
-
+    
+    connectpay_transaction_id = models.CharField(
+        max_length=100, 
+        blank=True, 
+        null=True, 
+        unique=True,
+        verbose_name=_("ConnectPay Transaction ID")
+    )
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='deposits', verbose_name=_("User"))
     plan = models.ForeignKey(
         Plan, 

@@ -1,6 +1,7 @@
 # api/views.py
 import logging
 import re
+import json
 from django.core.mail import mail_admins
 from django.urls import reverse
 from datetime import timedelta
@@ -26,6 +27,7 @@ from .serializers import (RegisterSerializer, UserSerializer, PlanSerializer, De
                           InitiateDepositPayloadSerializer)
 from .models import Plan, Deposit, Earning, Investment, User
 from .coinpayments_service import CoinPaymentsService
+from .connectpay_service import ConnectPayService
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +122,16 @@ class DepositViewSet(viewsets.ModelViewSet):
     serializer_class = DepositSerializer
     permission_classes = [IsAuthenticated]
 
+    def get_queryset(self):
+        """
+        Este método é sobrescrito para garantir que a view retorne
+        apenas os depósitos pertencentes ao usuário atualmente autenticado.
+        """
+        user = self.request.user
+        if user.is_authenticated:
+            return Deposit.objects.filter(user=user).order_by('-created_at')
+        return Deposit.objects.none()
+
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
 
@@ -127,48 +139,50 @@ class DepositViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        if serializer.validated_data.get('method') != 'USDT':
+        if serializer.validated_data.get('method') != 'USDT_BEP20':
             self.perform_create(serializer)
             headers = self.get_success_headers(serializer.data)
             return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
-        logger.info(f"Iniciando processo de depósito USDT para usuário {request.user.email} com valor {serializer.validated_data.get('amount')}")
-        deposit = serializer.save(user=self.request.user, status='FAILED')
+        logger.info(f"Iniciando processo de depósito USDT via DepositViewSet para usuário {request.user.username} com valor {serializer.validated_data.get('amount')}")
+        
+        deposit = serializer.save(user=self.request.user, status='PENDING') 
         
         try:
             ipn_url = request.build_absolute_uri(reverse('coinpayments-ipn'))
             
             service = CoinPaymentsService()
-            transaction = service.create_transaction(
+            transaction_cp = service.create_transaction( # Renomeado para transaction_cp para evitar conflito com django.db.transaction
                 amount=float(deposit.amount),
-                user_email=request.user.email,
+                user_email=request.user.email or f"user{request.user.id}@placeholder.com", # Garante um email
                 ipn_url=ipn_url,
                 deposit_id=deposit.id
             )
 
-            if not transaction or transaction.get('error') != 'ok':
-                error_message = transaction.get('error') if transaction else "Erro desconhecido na chamada do serviço CoinPayments"
-                logger.warning(f"Falha na API CoinPayments ao criar depósito para {request.user.email} (ID: {deposit.id}): {error_message}. Dados da transação: {transaction}")
+            if not transaction_cp or transaction_cp.get('error') != 'ok':
+                error_message = transaction_cp.get('error') if transaction_cp else "Erro desconhecido na CoinPayments"
+                logger.warning(f"Falha na API CoinPayments ao criar depósito (DepositViewSet) para {request.user.username} (ID: {deposit.id}): {error_message}.")
+                # Não altere o status para FAILED aqui necessariamente, pode ser um erro de comunicação.
+                # O depósito já está PENDING.
                 return Response(
                     {"detail": f"Falha na comunicação com o gateway: {error_message}"},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            result = transaction['result']
+            result = transaction_cp['result']
             deposit.coinpayments_txn_id = result['txn_id']
             deposit.payment_address = result['address']
             deposit.qrcode_url = result['qrcode_url']
             deposit.status_url = result['status_url']
-            deposit.status = 'PENDING'
             deposit.save()
 
-            logger.info(f"Depósito {deposit.id} (CP ID: {result['txn_id']}) com CoinPayments criado com sucesso para {request.user.email}.")
+            logger.info(f"Depósito {deposit.id} (CP ID: {result['txn_id']}) com CoinPayments (DepositViewSet) criado com sucesso para {request.user.username}.")
             updated_serializer = self.get_serializer(deposit)
             headers = self.get_success_headers(updated_serializer.data)
             return Response(updated_serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
         except Exception as e:
-            logger.error(f"ERRO INESPERADO ao criar depósito para {request.user.email} (ID provisório: {deposit.id}): {e}", exc_info=True)
+            logger.error(f"ERRO INESPERADO ao criar depósito (DepositViewSet) para {request.user.username} (ID: {deposit.id}): {e}", exc_info=True)
             return Response(
                 {"detail": "Ocorreu um erro interno ao processar o depósito. Nossa equipe foi notificada."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -532,34 +546,28 @@ class InitiateDepositView(APIView):
                 logger.info(f"Intenção de depósito ID {deposit.id} criada para usuário {user.username}, Plano {plan.name}, Valor {amount}, Método {payment_method}.")
 
                 if payment_method == 'USDT_BEP20':
-                    service = CoinPaymentsService()
-                    ipn_url = request.build_absolute_uri(reverse('coinpayments-ipn'))
-                    
-                    cp_transaction = service.create_transaction(
+                    coinpayments_service = CoinPaymentsService()
+                    ipn_url_cp = request.build_absolute_uri(reverse('coinpayments-ipn'))
+                    cp_transaction = coinpayments_service.create_transaction(
                         amount=float(deposit.amount),
                         user_email=user.email or f"user{user.id}@placeholder.com",
-                        ipn_url=ipn_url,
+                        ipn_url=ipn_url_cp,
                         deposit_id=deposit.id 
                     )
-
                     if not cp_transaction or cp_transaction.get('error') != 'ok':
                         error_message = cp_transaction.get('error') if cp_transaction else "Erro desconhecido na CoinPayments"
                         logger.error(f"Falha ao criar transação CoinPayments para Depósito ID {deposit.id}: {error_message}")
-                        deposit.status = 'FAILED'
-                        deposit.save()
-                        return Response(
-                            {"detail": _(f"Falha na comunicação com o gateway de pagamento: {error_message}")},
-                            status=status.HTTP_400_BAD_REQUEST
-                        )
+                        deposit.status = 'FAILED'; deposit.save()
+                        return Response({"detail": _(f"Falha na comunicação com o gateway de pagamento (USDT): {error_message}")}, status=status.HTTP_400_BAD_REQUEST)
                     
-                    result = cp_transaction['result']
-                    deposit.coinpayments_txn_id = result['txn_id']
-                    deposit.payment_address = result['address']
-                    deposit.qrcode_url = result['qrcode_url']
-                    deposit.status_url = result['status_url']
+                    result_cp = cp_transaction['result']
+                    deposit.coinpayments_txn_id = result_cp['txn_id']
+                    deposit.payment_address = result_cp['address']
+                    deposit.qrcode_url = result_cp['qrcode_url']
+                    deposit.status_url = result_cp['status_url']
                     deposit.save()
 
-                    response_data = {
+                    response_data_usdt = {
                         "depositId": str(deposit.id),
                         "planName": plan.name,
                         "amount": deposit.amount,
@@ -569,45 +577,185 @@ class InitiateDepositView(APIView):
                         "usdtQrCode": deposit.qrcode_url,
                         "instructionMessage": _(f"Envie exatamente {deposit.amount} USDT (rede BEP20) para o endereço fornecido. Transação ID: {deposit.coinpayments_txn_id}")
                     }
-                    return Response(response_data, status=status.HTTP_201_CREATED)
+                    return Response(response_data_usdt, status=status.HTTP_201_CREATED)
 
                 elif payment_method == 'PIX':
-                    deposit.pix_key = settings.PIX_STATIC_KEY # Ex: '000.000.000-00' ou chave aleatória
-                    deposit.pix_key_type = settings.PIX_STATIC_KEY_TYPE # Ex: 'cpf', 'random'
-                    deposit.pix_beneficiary_name = settings.PIX_BENEFICIARY_NAME # Ex: "Hoomoon LTDA"
+                    connectpay = ConnectPayService()
                     
-                    deposit.pix_qr_code_payload = f"BRCODE_PAYLOAD_PARA_DEPOSITO_{deposit.id}_VALOR_{deposit.amount}"
+                    webhook_url_to_send = f"{settings.CONNECTPAY_WEBHOOK_BASE_URL}/api/connectpay-webhook/"
+                    
+                    items_payload = [{
+                        "id": f"dep_{deposit.id}",
+                        "title": f"Depósito para Plano {plan.name}",
+                        "description": f"Depósito de {amount} para ativação do plano {plan.name}",
+                        "price": float(amount),
+                        "quantity": 1,
+                        "is_physical": False 
+                    }]
+                    
+                    customer_payload = {
+                        "name": user.name or user.username,
+                        "email": user.email or f"user{user.id}@placeholder.com",
+                        "phone": user.phone or "00000000000",
+                        "document_type": "CPF" if user.cpf else None,
+                        "document": user.cpf if user.cpf else None 
+                    }
+                    customer_payload = {k: v for k, v in customer_payload.items() if v is not None}
+                    if not customer_payload.get("document") or not customer_payload.get("document_type"):
+                        customer_payload.pop("document", None)
+                        customer_payload.pop("document_type", None)
+
+                    client_ip_address = request.META.get('REMOTE_ADDR') or "0.0.0.0"
+
+                    cp_data, error_msg = connectpay.create_pix_transaction(
+                        external_id=str(deposit.id),
+                        total_amount=float(amount),
+                        webhook_url=webhook_url_to_send,
+                        items=items_payload,
+                        customer_info=customer_payload,
+                        client_ip=client_ip_address
+                    )
+
+                    if error_msg or not cp_data:
+                        logger.error(f"ConnectPay - Falha ao criar transação PIX para Depósito ID {deposit.id}: {error_msg}")
+                        deposit.status = 'FAILED'; deposit.save()
+                        return Response({"detail": _(f"Falha ao iniciar pagamento PIX: {error_msg}")}, status=status.HTTP_400_BAD_REQUEST)
+
+                    deposit.connectpay_transaction_id = cp_data.get('id')
+                    pix_details = cp_data.get('pix', {})
+                    deposit.pix_qr_code_payload = pix_details.get('payload')
+                    deposit.pix_qr_code_image_url = pix_details.get('qr_code_image_url')
+                    
                     deposit.save()
-                    
-                    response_data = {
+
+                    response_data_pix = {
                         "depositId": str(deposit.id),
                         "planName": plan.name,
                         "amount": deposit.amount,
                         "paymentMethod": "pix",
-                        "pixKey": deposit.pix_key,
-                        "pixKeyType": deposit.pix_key_type,
-                        "beneficiaryName": deposit.pix_beneficiary_name,
+                        "pixKey": None,
+                        "pixKeyType": None,
+                        "beneficiaryName": settings.CONNECTPAY_BENEFICIARY_NAME or "Hoomoon",
                         "pixQrCodePayload": deposit.pix_qr_code_payload,
-                        "instructionMessage": _(f"Faça uma transferência PIX de R${deposit.amount} para a chave '{deposit.pix_key}' ({deposit.pix_key_type}) em nome de '{deposit.pix_beneficiary_name}', ou use o Copia e Cola.")
+                        # "pixQrCodeImageUrl": deposit.pix_qr_code_image_url,
+                        "instructionMessage": _(f"Use o código PIX Copia e Cola ou escaneie o QR Code para pagar R${deposit.amount}.")
                     }
-                    return Response(response_data, status=status.HTTP_201_CREATED)
+                    return Response(response_data_pix, status=status.HTTP_201_CREATED)
                 
                 else:
                     logger.warning(f"Método de pagamento '{payment_method}' não suportado para Depósito ID {deposit.id}.")
-                    deposit.status = 'FAILED'
-                    deposit.save()
-                    return Response(
-                        {"detail": _("Método de pagamento não suportado.")},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
+                    deposit.status = 'FAILED'; deposit.save()
+                    return Response({"detail": _("Método de pagamento não suportado.")}, status=status.HTTP_400_BAD_REQUEST)
 
-        except serializers.ValidationError as e:
-            return Response(e.detail, status=status.HTTP_400_BAD_REQUEST)
-        except Plan.DoesNotExist:
-            return Response({"detail": _("Plano selecionado não encontrado.")}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             logger.error(f"Erro ao iniciar depósito para usuário {user.username}: {e}", exc_info=True)
-            return Response(
-                {"detail": _("Ocorreu um erro interno ao processar sua solicitação de depósito.")},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+            return Response({"detail": _("Ocorreu um erro interno ao processar sua solicitação de depósito.")}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@method_decorator(csrf_exempt, name='dispatch') # Webhooks são externos e não terão token CSRF
+class ConnectPayWebhookView(APIView):
+    permission_classes = [AllowAny] # O webhook vem de um serviço externo
+
+    def _validate_signature(self, request):
+        """
+        Placeholder para validação da assinatura do webhook.
+        VOCÊ PRECISA IMPLEMENTAR ESTA VALIDAÇÃO CONFORME A DOCUMENTAÇÃO DA CONNECTPAY.
+        """
+        # Exemplo Hipotético (NÃO USE EM PRODUÇÃO SEM SABER O MÉTODO CORRETO DA CONNECTPAY):
+        # connectpay_signature = request.headers.get('X-ConnectPay-Signature')
+        # webhook_secret = settings.CONNECTPAY_WEBHOOK_SECRET 
+        # if not connectpay_signature or not webhook_secret:
+        #     logger.warning("ConnectPay Webhook: Assinatura ou segredo ausente.")
+        #     return False
+        #
+        # # Lógica para calcular sua própria assinatura com base no request.body e webhook_secret
+        # # e compará-la com connectpay_signature.
+        # # import hmac, hashlib
+        # #  calculated_signature = hmac.new(webhook_secret.encode(), request.body, hashlib.sha256).hexdigest()
+        # # if not hmac.compare_digest(calculated_signature, connectpay_signature):
+        # #     logger.warning("ConnectPay Webhook: Assinatura inválida.")
+        # #     return False
+        
+        logger.warning("ConnectPay Webhook: VALIDAÇÃO DE ASSINATURA AINDA NÃO IMPLEMENTADA CORRETAMENTE!")
+        # Retorne True por enquanto para permitir testes, mas isso é INSEGURO.
+        return True # REMOVA ESTA LINHA E IMPLEMENTE A VALIDAÇÃO REAL!
+
+    def post(self, request, *args, **kwargs):
+        logger.info(f"ConnectPay Webhook: Recebido. Headers: {request.headers}. Body: {request.body.decode()}")
+
+        if not self._validate_signature(request): # VALIDAÇÃO DA ASSINATURA
+            return Response({"detail": "Assinatura inválida."}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            payload = json.loads(request.body.decode('utf-8')) # Ou request.data se já vier parseado
+        except json.JSONDecodeError:
+            logger.error("ConnectPay Webhook: Payload JSON inválido.")
+            return Response({"detail": "Payload JSON inválido."}, status=status.HTTP_400_BAD_REQUEST)
+
+        connectpay_txn_id = payload.get('id')
+        external_id = payload.get('external_id') # Nosso deposit.id
+        payment_status = payload.get('status')
+        
+        logger.info(f"ConnectPay Webhook: Processando external_id: {external_id}, ConnectPay ID: {connectpay_txn_id}, Status: {payment_status}")
+
+        if not external_id or not payment_status:
+            logger.error(f"ConnectPay Webhook: external_id ou status ausentes no payload. Payload: {payload}")
+            return Response({"detail": "Dados insuficientes no webhook."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            with transaction.atomic():
+                deposit = Deposit.objects.select_for_update().select_related('user', 'plan').get(id=external_id)
+
+                if deposit.status == 'CONFIRMED':
+                    logger.info(f"ConnectPay Webhook: Depósito {deposit.id} (external_id: {external_id}) já está confirmado. Ignorando.")
+                    return Response({"message": "Depósito já confirmado."}, status=status.HTTP_200_OK)
+
+                if payment_status == "AUTHORIZED": # Pagamento confirmado pela ConnectPay
+                    if deposit.status != 'CONFIRMED': # Evita processar múltiplas vezes se já estiver confirmado
+                        deposit.status = 'CONFIRMED'
+                        deposit.connectpay_transaction_id = deposit.connectpay_transaction_id or connectpay_txn_id
+                        deposit.save(update_fields=['status', 'connectpay_transaction_id', 'updated_at'])
+                        
+                        user = deposit.user
+                        user.balance += deposit.amount # Atualiza saldo
+                        user.save(update_fields=['balance'])
+                        
+                        logger.info(f"ConnectPay Webhook: Saldo atualizado para usuário {user.username}. Depósito ID: {deposit.id}")
+
+                        if deposit.plan:
+                            if not Investment.objects.filter(deposit_source=deposit).exists():
+                                new_investment = Investment.objects.create(
+                                    user=user,
+                                    plan=deposit.plan,
+                                    amount=deposit.amount,
+                                    deposit_source=deposit,
+                                    status='ACTIVE'
+                                )
+                                logger.info(f"ConnectPay Webhook: Investimento {new_investment.code} criado e ativado para Depósito ID: {deposit.id}")
+                            else:
+                                logger.warning(f"ConnectPay Webhook: Investimento para Depósito {deposit.id} já existe.")
+                        else:
+                            logger.info(f"ConnectPay Webhook: Depósito {deposit.id} não tem plano associado. Nenhum investimento criado.")
+                    else:
+                         logger.info(f"ConnectPay Webhook: Depósito {deposit.id} (external_id: {external_id}) já estava confirmado (verificação intra-transação). Ignorando.")
+                
+                elif payment_status in ["FAILED", "CHARGEBACK", "IN_DISPUTE"]:
+                    if deposit.status != 'FAILED': # Ou outro status final apropriado
+                        deposit.status = 'FAILED' # Ou um status mais específico se você tiver
+                        deposit.save(update_fields=['status', 'updated_at'])
+                        logger.info(f"ConnectPay Webhook: Depósito {deposit.id} (external_id: {external_id}) marcado como {payment_status}.")
+                else:
+                    logger.info(f"ConnectPay Webhook: Status '{payment_status}' para Depósito {deposit.id} não requer ação de investimento imediata.")
+                    # Você pode querer atualizar o status do depósito para refletir PENDING, etc.
+                    # if payment_status == "PENDING" and deposit.status != "PENDING":
+                    #    deposit.status = "PENDING"
+                    #    deposit.save(update_fields=['status', 'updated_at'])
+
+
+            return Response({"message": "Webhook processado."}, status=status.HTTP_200_OK)
+
+        except Deposit.DoesNotExist:
+            logger.error(f"ConnectPay Webhook: Depósito com external_id {external_id} não encontrado.")
+            return Response({"detail": "Depósito não encontrado."}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            logger.error(f"ConnectPay Webhook: Erro ao processar webhook para external_id {external_id}. Erro: {e}", exc_info=True)
+            return Response({"detail": "Erro interno no processamento do webhook."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

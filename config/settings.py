@@ -108,6 +108,16 @@ COINPAYMENTS_PRIVATE_KEY = config('COINPAYMENTS_PRIVATE_KEY')
 COINPAYMENTS_IPN_SECRET = config('COINPAYMENTS_IPN_SECRET')
 COINPAYMENTS_MERCHANT_ID = config('COINPAYMENTS_MERCHANT_ID')
 
+# ConnectPay
+CONNECTPAY_BASE_URL = "https://api.connectpay.vc"
+CONNECTPAY_API_SECRET = config('CONNECTPAY_API_SECRET')
+if not CONNECTPAY_API_SECRET:
+    print("ALERTA: CONNECTPAY_API_SECRET não definida como variável de ambiente.")
+
+CONNECTPAY_WEBHOOK_BASE_URL = config('CONNECTPAY_WEBHOOK_BASE_URL', default="http://localhost:3333")
+CONNECTPAY_BENEFICIARY_NAME = config('CONNECTPAY_BENEFICIARY_NAME', default="Nome da Sua Empresa Hoomoon")
+CONNECTPAY_WEBHOOK_TOKEN = config('CONNECTPAY_WEBHOOK_TOKEN', default=None)
+
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
