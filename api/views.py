@@ -8,6 +8,7 @@ from django.conf import settings
 from django.db.models import Sum
 from django.db import transaction
 from django.http import HttpResponse
+from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from django.contrib.auth import get_user_model
@@ -389,3 +390,59 @@ def check_cpf_exists(request):
         return Response({'error': 'CPF deve ter 11 dígitos'}, status=status.HTTP_400_BAD_REQUEST)
     exists = User.objects.filter(cpf=cpf).exists()
     return Response({'exists': exists})
+
+class FreePlanActivateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        user = request.user
+        
+        try:
+            free_plan = Plan.objects.get(id=Plan.HOO_FREE)
+        except Plan.DoesNotExist:
+            logger.error(f"Plano HOO_FREE não encontrado na base de dados.")
+            return Response(
+                {"detail": "O plano gratuito não está configurado no sistema. Por favor, contate o suporte."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        if Investment.objects.filter(user=user, status='ACTIVE').exists():
+            return Response(
+                {"detail": "Você já possui um plano ativo ou o plano gratuito já foi ativado."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            with transaction.atomic():
+                start_time = timezone.now()
+                
+                if not free_plan.duration_days or free_plan.duration_days <= 0:
+                    expiration = start_time + timezone.timedelta(days=free_plan.duration_days)
+                else:
+                    expiration = start_time + timezone.timedelta(days=free_plan.duration_days)
+
+
+                investment = Investment.objects.create(
+                    user=user,
+                    plan=free_plan,
+                    amount=0.00,
+                    status='ACTIVE',
+                    start_date=start_time,
+                    expiration_date=expiration.date() 
+                )
+                
+                logger.info(f"Plano {free_plan.name} ativado para o usuário {user.username}. Código de ativação: {investment.code}")
+                
+                response_data = {
+                    "message": f"{free_plan.name} ativado com sucesso!",
+                    "activationCode": investment.code,
+                    "activationDate": investment.start_date.isoformat()
+                }
+                return Response(response_data, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            logger.error(f"Erro ao ativar plano gratuito para {user.username}: {e}", exc_info=True)
+            return Response(
+                {"detail": "Ocorreu um erro ao tentar ativar o plano. Tente novamente mais tarde."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
