@@ -108,7 +108,7 @@ class UserProfileView(APIView):
         return Response(UserSerializer(request.user).data)
 
 class PlanViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = Plan.objects.all()
+    queryset = Plan.objects.all().order_by('min_value')
     serializer_class = PlanSerializer
     permission_classes = [AllowAny]
 

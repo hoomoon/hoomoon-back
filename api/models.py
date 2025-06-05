@@ -5,6 +5,7 @@ from django.db.models import Q, UniqueConstraint
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.utils import timezone
 from django.utils.crypto import get_random_string
+from django.utils.translation import gettext_lazy as _
 
 
 class UserManager(BaseUserManager):
@@ -69,17 +70,45 @@ class User(AbstractUser):
 
 
 class Plan(models.Model):
-    PLAN_TAGS = (('FREE', 'Free'), ('DIAMOND', 'Diamond'), ('IMPERIAL', 'Imperial'))
-    id = models.CharField(max_length=20, primary_key=True, choices=PLAN_TAGS)
-    name = models.CharField(max_length=50)
-    tag = models.CharField(max_length=20, blank=True)
-    description = models.TextField()
-    daily_percent = models.DecimalField(max_digits=5, decimal_places=2)
-    duration_days = models.PositiveIntegerField()
-    cap_percent = models.DecimalField(max_digits=5, decimal_places=2)
+    HOO_FREE = "FREE"
+    HOO_PANDORA = "PANDORA"
+    HOO_TITAN = "TITAN"
+    HOO_CALLISTO = "CALLISTO"
+
+    PLAN_IDS = [
+        (HOO_FREE, _("Hoo Free")),
+        (HOO_PANDORA, _("Hoo Pandora")),
+        (HOO_TITAN, _("Hoo Titan")),
+        (HOO_CALLISTO, _("Hoo Callisto")),
+    ]
+    
+    id = models.CharField(
+        max_length=20, 
+        primary_key=True, 
+        choices=PLAN_IDS, 
+        verbose_name=_("Plan ID")
+    )
+    name = models.CharField(max_length=100, verbose_name=_("Plan Name"))
+    image_src = models.CharField(max_length=255, blank=True, verbose_name=_("Image Source URL"))
+    color = models.CharField(max_length=7, default="#FFFFFF", verbose_name=_("Color Hex Code (e.g., #RRGGBB)"))
+    min_value = models.DecimalField(
+        max_digits=10, 
+        decimal_places=2, 
+        default=0.00, 
+        verbose_name=_("Minimum Investment Value")
+    )
+    tag = models.CharField(max_length=50, blank=True, verbose_name=_("Tag (e.g., Popular, Premium)"))
+    description = models.TextField(blank=True, verbose_name=_("Description"))
+    daily_percent = models.DecimalField(max_digits=5, decimal_places=2, verbose_name=_("Daily Yield Percentage"))
+    duration_days = models.PositiveIntegerField(verbose_name=_("Duration in Days"))
+    cap_percent = models.DecimalField(max_digits=5, decimal_places=2, verbose_name=_("Yield Cap Percentage"))
 
     def __str__(self):
         return self.name
+
+    class Meta:
+        verbose_name = _("Investment Plan")
+        verbose_name_plural = _("Investment Plans")
 
 
 class Deposit(models.Model):

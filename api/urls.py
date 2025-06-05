@@ -1,8 +1,10 @@
 # api/urls.py
 from django.urls import path, include # type: ignore
 from rest_framework.routers import DefaultRouter # type: ignore
-from .views import PlanViewSet, DepositViewSet, MyNetworkView, CoinPaymentsIPNView # type: ignore
-from .views import check_email_exists, check_cpf_exists, sponsor_by_code, check_username_exists # type: ignore
+from .views import (
+    PlanViewSet, DepositViewSet, MyNetworkView, CoinPaymentsIPNView,
+    check_email_exists, check_cpf_exists, sponsor_by_code, check_username_exists
+)
 
 router = DefaultRouter()
 router.register(r'plans', PlanViewSet, basename='plan')
