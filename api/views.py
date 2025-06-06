@@ -488,6 +488,31 @@ class FreePlanActivateView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
         
+class FreePlanStatusView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        user = request.user
+        
+        try:
+            free_plan = Plan.objects.get(id=Plan.HOO_FREE)
+            is_activated = Investment.objects.filter(
+                user=user,
+                plan=free_plan,
+                status='ACTIVE'
+            ).exists()
+            
+            return Response({
+                "isActivated": is_activated
+            }, status=status.HTTP_200_OK)
+            
+        except Plan.DoesNotExist:
+            logger.error(f"Plano HOO_FREE não encontrado na base de dados.")
+            return Response(
+                {"detail": "O plano gratuito não está configurado no sistema."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
 class InitiateDepositView(APIView):
     permission_classes = [IsAuthenticated]
     serializer_class = InitiateDepositPayloadSerializer

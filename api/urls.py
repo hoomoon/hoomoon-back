@@ -4,7 +4,8 @@ from rest_framework.routers import DefaultRouter # type: ignore
 from .views import (
     PlanViewSet, DepositViewSet, MyNetworkView, CoinPaymentsIPNView,
     check_email_exists, check_cpf_exists, sponsor_by_code, check_username_exists,
-    FreePlanActivateView, InitiateDepositView, ConnectPayWebhookView 
+    FreePlanActivateView, InitiateDepositView, ConnectPayWebhookView,
+    FreePlanStatusView
 )
 
 router = DefaultRouter()
@@ -19,6 +20,7 @@ urlpatterns = [
 
     # Investments
     path('investments/plans/free/activate/', FreePlanActivateView.as_view(), name='free_plan_activate'),
+    path('investments/plans/free/status/', FreePlanStatusView.as_view(), name='free_plan_status'),
     path('investments/deposits/initiate/', InitiateDepositView.as_view(), name='initiate_deposit'),
     
     # checkers
