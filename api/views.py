@@ -153,41 +153,18 @@ class DepositViewSet(viewsets.ModelViewSet):
         
         try:
             ipn_url = request.build_absolute_uri(reverse('coinpayments-ipn'))
-            
             service = CoinPaymentsService()
             
-            # Primeiro, obtemos a taxa de conversão e valores exatos da CoinPayments
-            desired_amount = float(serializer.validated_data.get('amount'))
-            transaction_cp = service.create_transaction(
-                amount=desired_amount,
-                user_email=request.user.email or f"user{request.user.id}@placeholder.com",
-                ipn_url=ipn_url,
-                get_rates_only=True  # Primeiro só obtém as taxas
-            )
-
-            if not transaction_cp or transaction_cp.get('error') != 'ok':
-                error_message = transaction_cp.get('error') if transaction_cp else "Erro desconhecido na CoinPayments"
-                logger.warning(f"Falha ao obter taxas da CoinPayments para {request.user.username}: {error_message}.")
-                return Response(
-                    {"detail": f"Falha na comunicação com o gateway: {error_message}"},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-            # Obtém os valores convertidos
-            result = transaction_cp['result']
-            amount1 = Decimal(str(result.get('amount')))  # Valor que o usuário deve enviar
-            amount2 = Decimal(str(result.get('amount2')))  # Valor convertido que será recebido
-
-            # Agora criamos o depósito com o valor exato que o usuário deve enviar
+            # Criamos primeiro o depósito com o valor inicial
             deposit = serializer.save(
                 user=self.request.user,
                 status='PENDING',
-                amount=amount1  # Salvamos o valor que o usuário deve enviar
+                amount=serializer.validated_data.get('amount')
             )
 
-            # Criamos a transação real na CoinPayments
+            # Criamos a transação na CoinPayments
             transaction_cp = service.create_transaction(
-                amount=float(amount1),  # Usamos o valor exato calculado
+                amount=float(deposit.amount),
                 user_email=request.user.email or f"user{request.user.id}@placeholder.com",
                 ipn_url=ipn_url,
                 deposit_id=deposit.id
@@ -196,12 +173,21 @@ class DepositViewSet(viewsets.ModelViewSet):
             if not transaction_cp or transaction_cp.get('error') != 'ok':
                 error_message = transaction_cp.get('error') if transaction_cp else "Erro desconhecido na CoinPayments"
                 logger.warning(f"Falha na API CoinPayments ao criar depósito para {request.user.username} (ID: {deposit.id}): {error_message}.")
+                deposit.status = 'FAILED'
+                deposit.save()
                 return Response(
                     {"detail": f"Falha na comunicação com o gateway: {error_message}"},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
             result = transaction_cp['result']
+            
+            # Obtém os valores exatos da transação
+            amount1 = Decimal(str(result.get('amount')))  # Valor que o usuário deve enviar
+            amount2 = Decimal(str(result.get('amount2')))  # Valor convertido que será recebido
+
+            # Atualiza o depósito com os dados da transação
+            deposit.amount = amount1  # Valor que o usuário deve enviar
             deposit.coinpayments_txn_id = result['txn_id']
             deposit.payment_address = result['address']
             deposit.qrcode_url = result['qrcode_url']
