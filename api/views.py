@@ -28,6 +28,7 @@ from .serializers import (RegisterSerializer, UserSerializer, PlanSerializer, De
 from .models import Plan, Deposit, Earning, Investment, User
 from .coinpayments_service import CoinPaymentsService
 from .connectpay_service import ConnectPayService
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -632,8 +633,10 @@ class InitiateDepositView(APIView):
 
                     client_ip_address = request.META.get('REMOTE_ADDR') or "0.0.0.0"
 
+                    unique_external_id = f"{deposit.id}_{int(timezone.now().timestamp())}"
+
                     cp_data, error_msg = connectpay.create_pix_transaction(
-                        external_id=str(deposit.id),
+                        external_id=unique_external_id,
                         total_amount=float(amount),
                         webhook_url=webhook_url_to_send,
                         items=items_payload,
