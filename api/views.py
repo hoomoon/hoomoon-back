@@ -252,7 +252,7 @@ class CoinPaymentsIPNView(APIView):
                 new_status = 'CONFIRMED'
                 deposit.transaction_hash = txn_id_coinpayments
             elif payment_status == 1:
-                new_status = 'PAID'
+                new_status = 'CONFIRMED'
             elif payment_status < 0:
                 new_status = 'FAILED'
 
