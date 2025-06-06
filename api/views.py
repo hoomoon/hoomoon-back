@@ -24,7 +24,7 @@ from rest_framework import status, viewsets
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from urllib.parse import urlencode
 from .serializers import (RegisterSerializer, UserSerializer, PlanSerializer, DepositSerializer, 
-                          InitiateDepositPayloadSerializer)
+                          InitiateDepositPayloadSerializer, AdminLoginSerializer)
 from .models import Plan, Deposit, Earning, Investment, User, OnchainTransaction
 from .coinpayments_service import CoinPaymentsService
 from .connectpay_service import ConnectPayService
@@ -882,3 +882,43 @@ class ConnectPayWebhookView(APIView):
         except Exception as e:
             logger.error(f"ConnectPay Webhook: Erro ao processar webhook para external_id {external_id}. Erro: {e}", exc_info=True)
             return Response({"detail": "Erro interno no processamento do webhook."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class AdminLoginView(APIView):
+    permission_classes = [AllowAny]
+    serializer_class = AdminLoginSerializer
+
+    def post(self, request):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.validated_data['user']
+        
+        refresh = RefreshToken.for_user(user)
+        access = str(refresh.access_token)
+        
+        response = Response({
+            'detail': 'Login administrativo bem-sucedido',
+            'user': UserSerializer(user).data
+        })
+        
+        # Configuração dos cookies
+        response.set_cookie(
+            'access_token',
+            access,
+            max_age=_secs(settings.SIMPLE_JWT['ACCESS_TOKEN_LIFETIME']),
+            httponly=True,
+            secure=not settings.DEBUG,
+            samesite='None' if not settings.DEBUG else 'Lax',
+            path='/'
+        )
+        
+        response.set_cookie(
+            'refresh_token',
+            str(refresh),
+            max_age=_secs(settings.SIMPLE_JWT['REFRESH_TOKEN_LIFETIME']),
+            httponly=True,
+            secure=not settings.DEBUG,
+            samesite='None' if not settings.DEBUG else 'Lax',
+            path='/'
+        )
+        
+        return response

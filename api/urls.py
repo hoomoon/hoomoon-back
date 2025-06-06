@@ -5,7 +5,7 @@ from .views import (
     PlanViewSet, DepositViewSet, MyNetworkView, CoinPaymentsIPNView,
     check_email_exists, check_cpf_exists, sponsor_by_code, check_username_exists,
     FreePlanActivateView, InitiateDepositView, ConnectPayWebhookView,
-    FreePlanStatusView, update_cpf
+    FreePlanStatusView, update_cpf, AdminLoginView
 )
 
 router = DefaultRouter()
@@ -17,6 +17,9 @@ urlpatterns = [
     path('minha-rede/', MyNetworkView.as_view(), name='minha-rede'),
     path('coinpayments-ipn/', CoinPaymentsIPNView.as_view(), name='coinpayments-ipn'),
     path('connectpay-webhook/', ConnectPayWebhookView.as_view(), name='connectpay_webhook'),
+
+    # Admin
+    path('admin/login/', AdminLoginView.as_view(), name='admin-login'),
 
     # Investments
     path('investments/plans/free/activate/', FreePlanActivateView.as_view(), name='free_plan_activate'),

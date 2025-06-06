@@ -6,6 +6,7 @@ from rest_framework import serializers, status
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.validators import UniqueValidator
+from django.contrib.auth import authenticate
 
 from .models import User, Plan, Deposit, Investment, Earning, OnchainTransaction
 
@@ -234,4 +235,35 @@ class InitiateDepositPayloadSerializer(serializers.Serializer):
                 raise serializers.ValidationError({
                     "amount": f"O valor do depósito (R${amount}) é inferior ao mínimo exigido para o plano {plan.name} (R${plan.min_value})."
                 })
+        return data
+
+class AdminLoginSerializer(serializers.Serializer):
+    username = serializers.CharField()
+    password = serializers.CharField(write_only=True)
+
+    def validate(self, data):
+        username = data.get('username')
+        password = data.get('password')
+
+        if username and password:
+            user = authenticate(username=username, password=password)
+            if user:
+                if not user.is_staff:
+                    raise serializers.ValidationError(
+                        'Este usuário não tem permissão para acessar o painel administrativo.'
+                    )
+                if not user.is_active:
+                    raise serializers.ValidationError(
+                        'Esta conta está desativada.'
+                    )
+            else:
+                raise serializers.ValidationError(
+                    'Usuário ou senha incorretos.'
+                )
+        else:
+            raise serializers.ValidationError(
+                'Usuário e senha são obrigatórios.'
+            )
+
+        data['user'] = user
         return data
