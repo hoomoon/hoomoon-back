@@ -5,7 +5,7 @@ from .views import (
     PlanViewSet, DepositViewSet, MyNetworkView, CoinPaymentsIPNView,
     check_email_exists, check_cpf_exists, sponsor_by_code, check_username_exists,
     FreePlanActivateView, InitiateDepositView, ConnectPayWebhookView,
-    FreePlanStatusView
+    FreePlanStatusView, update_cpf
 )
 
 router = DefaultRouter()
@@ -27,5 +27,6 @@ urlpatterns = [
     path('sponsor/<str:code>/', sponsor_by_code, name='sponsor-by-code'),
     path('check-email/', check_email_exists, name='check-email'),
     path('check-cpf/', check_cpf_exists, name='check-cpf'),
-    path('check-username/', check_username_exists, name='check-username')
+    path('check-username/', check_username_exists, name='check-username'),
+    path('update-cpf/', update_cpf, name='update-cpf'),
 ]

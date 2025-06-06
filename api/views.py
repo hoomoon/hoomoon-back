@@ -13,7 +13,7 @@ from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.csrf import csrf_exempt
-from django.contrib.auth import get_user_model
+from django.contrib.auth import get_user_model, authenticate
 from drf_spectacular.utils import extend_schema, OpenApiResponse
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.generics import CreateAPIView
@@ -25,10 +25,14 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from urllib.parse import urlencode
 from .serializers import (RegisterSerializer, UserSerializer, PlanSerializer, DepositSerializer, 
                           InitiateDepositPayloadSerializer)
-from .models import Plan, Deposit, Earning, Investment, User
+from .models import Plan, Deposit, Earning, Investment, User, OnchainTransaction
 from .coinpayments_service import CoinPaymentsService
 from .connectpay_service import ConnectPayService
 import uuid
+from django.core.exceptions import ValidationError
+from django.shortcuts import get_object_or_404
+from rest_framework_simplejwt.tokens import RefreshToken
+from decimal import Decimal
 
 logger = logging.getLogger(__name__)
 
@@ -147,24 +151,51 @@ class DepositViewSet(viewsets.ModelViewSet):
 
         logger.info(f"Iniciando processo de depósito USDT via DepositViewSet para usuário {request.user.username} com valor {serializer.validated_data.get('amount')}")
         
-        deposit = serializer.save(user=self.request.user, status='PENDING') 
-        
         try:
             ipn_url = request.build_absolute_uri(reverse('coinpayments-ipn'))
             
             service = CoinPaymentsService()
-            transaction_cp = service.create_transaction( # Renomeado para transaction_cp para evitar conflito com django.db.transaction
-                amount=float(deposit.amount),
-                user_email=request.user.email or f"user{request.user.id}@placeholder.com", # Garante um email
+            
+            # Primeiro, obtemos a taxa de conversão e valores exatos da CoinPayments
+            desired_amount = float(serializer.validated_data.get('amount'))
+            transaction_cp = service.create_transaction(
+                amount=desired_amount,
+                user_email=request.user.email or f"user{request.user.id}@placeholder.com",
+                ipn_url=ipn_url,
+                get_rates_only=True  # Primeiro só obtém as taxas
+            )
+
+            if not transaction_cp or transaction_cp.get('error') != 'ok':
+                error_message = transaction_cp.get('error') if transaction_cp else "Erro desconhecido na CoinPayments"
+                logger.warning(f"Falha ao obter taxas da CoinPayments para {request.user.username}: {error_message}.")
+                return Response(
+                    {"detail": f"Falha na comunicação com o gateway: {error_message}"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # Obtém os valores convertidos
+            result = transaction_cp['result']
+            amount1 = Decimal(str(result.get('amount')))  # Valor que o usuário deve enviar
+            amount2 = Decimal(str(result.get('amount2')))  # Valor convertido que será recebido
+
+            # Agora criamos o depósito com o valor exato que o usuário deve enviar
+            deposit = serializer.save(
+                user=self.request.user,
+                status='PENDING',
+                amount=amount1  # Salvamos o valor que o usuário deve enviar
+            )
+
+            # Criamos a transação real na CoinPayments
+            transaction_cp = service.create_transaction(
+                amount=float(amount1),  # Usamos o valor exato calculado
+                user_email=request.user.email or f"user{request.user.id}@placeholder.com",
                 ipn_url=ipn_url,
                 deposit_id=deposit.id
             )
 
             if not transaction_cp or transaction_cp.get('error') != 'ok':
                 error_message = transaction_cp.get('error') if transaction_cp else "Erro desconhecido na CoinPayments"
-                logger.warning(f"Falha na API CoinPayments ao criar depósito (DepositViewSet) para {request.user.username} (ID: {deposit.id}): {error_message}.")
-                # Não altere o status para FAILED aqui necessariamente, pode ser um erro de comunicação.
-                # O depósito já está PENDING.
+                logger.warning(f"Falha na API CoinPayments ao criar depósito para {request.user.username} (ID: {deposit.id}): {error_message}.")
                 return Response(
                     {"detail": f"Falha na comunicação com o gateway: {error_message}"},
                     status=status.HTTP_400_BAD_REQUEST
@@ -177,10 +208,20 @@ class DepositViewSet(viewsets.ModelViewSet):
             deposit.status_url = result['status_url']
             deposit.save()
 
-            logger.info(f"Depósito {deposit.id} (CP ID: {result['txn_id']}) com CoinPayments (DepositViewSet) criado com sucesso para {request.user.username}.")
+            logger.info(f"Depósito {deposit.id} (CP ID: {result['txn_id']}) com CoinPayments criado com sucesso. "
+                      f"Valor a enviar: {amount1} USDT, Valor a receber: {amount2} USDT")
+
             updated_serializer = self.get_serializer(deposit)
             headers = self.get_success_headers(updated_serializer.data)
-            return Response(updated_serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+            
+            response_data = updated_serializer.data
+            response_data.update({
+                'amount_to_send': str(amount1),
+                'amount_to_receive': str(amount2),
+                'warning': f'ATENÇÃO: Envie exatamente {amount1} USDT. Valores diferentes podem resultar em perda de fundos.'
+            })
+            
+            return Response(response_data, status=status.HTTP_201_CREATED, headers=headers)
 
         except Exception as e:
             logger.error(f"ERRO INESPERADO ao criar depósito (DepositViewSet) para {request.user.username} (ID: {deposit.id}): {e}", exc_info=True)
@@ -194,7 +235,7 @@ class CoinPaymentsIPNView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request, *args, **kwargs):
-        logger.info(f"Recebida notificação IPN da CoinPayments. Headers: {request.headers}. Body (primeiros 500 chars): {str(request.data)[:500]}")
+        logger.info(f"Recebida notificação IPN da CoinPayments. Headers: {request.headers}. Body (completo): {request.data}")
         
         raw_post_data = urlencode(request.data)
         
@@ -228,9 +269,38 @@ class CoinPaymentsIPNView(APIView):
             deposit_id = int(deposit_id_str)
             txn_id_coinpayments = request.data.get('txn_id')
             
-            logger.info(f"Processando IPN para deposit_id: {deposit_id}, txn_id CoinPayments: {txn_id_coinpayments}")
+            # Obtém os valores do pagamento
+            amount1 = Decimal(str(request.data.get('amount1', '0')))  # Valor que o usuário deveria enviar
+            amount2 = Decimal(str(request.data.get('amount2', '0')))  # Valor convertido que será recebido
             
-            deposit = Deposit.objects.get(id=deposit_id)
+            logger.info(f"Processando IPN para deposit_id: {deposit_id}, txn_id CoinPayments: {txn_id_coinpayments}. "
+                       f"Valores - Enviado: {amount1} USDT, Recebido: {amount2} USDT")
+            
+            # Primeiro, vamos verificar se existe um depósito com o txn_id
+            try:
+                deposit = Deposit.objects.get(coinpayments_txn_id=txn_id_coinpayments)
+                if deposit.id != deposit_id:
+                    logger.error(f"Inconsistência: IPN com deposit_id {deposit_id} mas txn_id {txn_id_coinpayments} pertence ao depósito {deposit.id}")
+                    return HttpResponse("Inconsistent deposit_id and txn_id", status=400)
+            except Deposit.DoesNotExist:
+                # Se não encontrou por txn_id, tenta por ID
+                try:
+                    deposit = Deposit.objects.get(id=deposit_id)
+                    if deposit.coinpayments_txn_id and deposit.coinpayments_txn_id != txn_id_coinpayments:
+                        logger.error(f"Inconsistência: Depósito {deposit_id} já tem txn_id {deposit.coinpayments_txn_id} mas IPN veio com txn_id {txn_id_coinpayments}")
+                        return HttpResponse("Inconsistent txn_id", status=400)
+                except Deposit.DoesNotExist:
+                    logger.error(f"IPN recebido para deposit_id {deposit_id} não encontrado no banco de dados. Dados completos do IPN: {request.data}")
+                    # Vamos verificar se existe algum depósito recente para esse usuário
+                    user_email = request.data.get('email')
+                    if user_email:
+                        recent_deposits = Deposit.objects.filter(
+                            user__email=user_email,
+                            created_at__gte=timezone.now() - timezone.timedelta(hours=24)
+                        ).order_by('-created_at')
+                        if recent_deposits.exists():
+                            logger.info(f"Depósitos recentes encontrados para o email {user_email}: {[d.id for d in recent_deposits]}")
+                    return HttpResponse("Deposit not found", status=404)
             
             payment_status_str = request.data.get('status')
             if not payment_status_str or not payment_status_str.lstrip('-').isdigit():
@@ -251,8 +321,12 @@ class CoinPaymentsIPNView(APIView):
             if payment_status >= 100 or payment_status == 2:
                 new_status = 'CONFIRMED'
                 deposit.transaction_hash = txn_id_coinpayments
+                # Atualiza o valor final recebido
+                deposit.amount = amount2
             elif payment_status == 1:
                 new_status = 'PAID'
+                # Atualiza o valor que deve ser enviado
+                deposit.amount = amount1
             elif payment_status < 0:
                 new_status = 'FAILED'
 
@@ -267,14 +341,18 @@ class CoinPaymentsIPNView(APIView):
 
                         user_to_update = User.objects.select_for_update().get(pk=d_to_update.user.id)
                         
-                        user_to_update.balance += d_to_update.amount
+                        # Usa o amount2 (valor convertido/recebido) para atualizar o saldo
+                        user_to_update.balance += amount2
                         user_to_update.save(update_fields=['balance'])
                         
                         d_to_update.status = 'CONFIRMED'
+                        d_to_update.amount = amount2  # Atualiza para o valor final recebido
                         d_to_update.coinpayments_txn_id = d_to_update.coinpayments_txn_id or txn_id_coinpayments
                         d_to_update.save()
                         
-                        logger.info(f"SALDO CREDITADO! Usuário: {user_to_update.username}, Valor: {d_to_update.amount}, Novo Saldo: {user_to_update.balance}")
+                        logger.info(f"SALDO CREDITADO! Usuário: {user_to_update.username}, "
+                                  f"Valor enviado: {amount1} USDT, Valor recebido: {amount2} USDT, "
+                                  f"Novo Saldo: {user_to_update.balance}")
 
                         if d_to_update.plan:
                             if not Investment.objects.filter(deposit_source=d_to_update).exists():
@@ -432,6 +510,36 @@ def check_cpf_exists(request):
         return Response({'error': 'CPF deve ter 11 dígitos'}, status=status.HTTP_400_BAD_REQUEST)
     exists = User.objects.filter(cpf=cpf).exists()
     return Response({'exists': exists})
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def update_cpf(request):
+    """
+    Atualiza o CPF do usuário autenticado.
+    Requer autenticação.
+    """
+    cpf = request.data.get('cpf', '').strip()
+    if not cpf:
+        return Response({'error': 'CPF é obrigatório'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Remove caracteres não numéricos
+    cpf = ''.join(filter(str.isdigit, cpf))
+    
+    # Valida o formato do CPF
+    if len(cpf) != 11:
+        return Response({'error': 'CPF deve ter 11 dígitos'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Verifica se o CPF já está em uso por outro usuário
+    if User.objects.filter(cpf=cpf).exclude(id=request.user.id).exists():
+        return Response({'error': 'Este CPF já está em uso por outro usuário'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        user = request.user
+        user.cpf = cpf
+        user.save(update_fields=['cpf', 'updated_at'])
+        return Response({'message': 'CPF atualizado com sucesso'})
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class FreePlanActivateView(APIView):
     permission_classes = [IsAuthenticated]
@@ -633,7 +741,8 @@ class InitiateDepositView(APIView):
 
                     client_ip_address = request.META.get('REMOTE_ADDR') or "0.0.0.0"
 
-                    unique_external_id = f"{deposit.id}_{int(timezone.now().timestamp())}"
+                    # Gera um ID único usando UUID
+                    unique_external_id = str(uuid.uuid4())
 
                     cp_data, error_msg = connectpay.create_pix_transaction(
                         external_id=unique_external_id,
