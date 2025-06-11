@@ -50,9 +50,11 @@ class User(AbstractUser):
 
     def save(self, *args, **kwargs):
         if not self.referral_code:
+            from django.conf import settings
+            prefix = getattr(settings, 'REFERRAL_CODE_PREFIX', 'INV')
             code = None
             while not code or User.objects.filter(referral_code=code).exists():
-                code = f"HOO-{get_random_string(8).upper()}"
+                code = f"{prefix}-{get_random_string(8).upper()}"
             self.referral_code = code
         super().save(*args, **kwargs)
 

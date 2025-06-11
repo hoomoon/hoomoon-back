@@ -15,6 +15,35 @@ CONSOLE_LOG_LEVEL = config('CONSOLE_LOG_LEVEL', default='DEBUG' if DEBUG else 'I
 FILE_LOG_LEVEL = config('FILE_LOG_LEVEL', default='DEBUG' if DEBUG else 'INFO', cast=str).upper()
 API_APP_LOG_LEVEL = config('API_APP_LOG_LEVEL', default='DEBUG' if DEBUG else 'INFO', cast=str).upper()
 
+# System Configuration - Configurações específicas do sistema
+SYSTEM_NAME = config('SYSTEM_NAME', default='Investment Platform')
+SYSTEM_VERSION = config('SYSTEM_VERSION', default='1.0.0')
+COMPANY_NAME = config('COMPANY_NAME', default='Financial Services Inc.')
+COMPANY_LOGO = config('COMPANY_LOGO', default='')
+SYSTEM_THEME_COLOR = config('SYSTEM_THEME_COLOR', default='#1e40af')
+REFERRAL_CODE_PREFIX = config('REFERRAL_CODE_PREFIX', default='INV')
+
+# Feature Toggles - Controle de funcionalidades
+FEATURES = {
+    'REFERRAL_SYSTEM': config('FEATURE_REFERRAL_SYSTEM', default=True, cast=bool),
+    'MULTI_CURRENCY': config('FEATURE_MULTI_CURRENCY', default=True, cast=bool),
+    'KYC_VERIFICATION': config('FEATURE_KYC_VERIFICATION', default=True, cast=bool),
+    'AUTOMATED_YIELDS': config('FEATURE_AUTOMATED_YIELDS', default=True, cast=bool),
+    'PIX_PAYMENTS': config('FEATURE_PIX_PAYMENTS', default=True, cast=bool),
+    'CRYPTO_PAYMENTS': config('FEATURE_CRYPTO_PAYMENTS', default=True, cast=bool),
+    'ADMIN_DASHBOARD': config('FEATURE_ADMIN_DASHBOARD', default=True, cast=bool),
+}
+
+# Business Rules - Regras de negócio configuráveis
+BUSINESS_RULES = {
+    'MIN_DEPOSIT_AMOUNT': config('MIN_DEPOSIT_AMOUNT', default=10.00, cast=float),
+    'MAX_DEPOSIT_AMOUNT': config('MAX_DEPOSIT_AMOUNT', default=50000.00, cast=float),
+    'REFERRAL_BONUS_PERCENT': config('REFERRAL_BONUS_PERCENT', default=5.0, cast=float),
+    'DEFAULT_CURRENCY': config('DEFAULT_CURRENCY', default='USD'),
+    'WITHDRAWAL_FEE_PERCENT': config('WITHDRAWAL_FEE_PERCENT', default=2.0, cast=float),
+    'MIN_WITHDRAWAL_AMOUNT': config('MIN_WITHDRAWAL_AMOUNT', default=50.00, cast=float),
+}
+
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -24,8 +53,21 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'corsheaders',
     'rest_framework',
+    'rest_framework_simplejwt',
+    'rest_framework_simplejwt.token_blacklist',
     'drf_spectacular',
-    'api',
+    'django_filters',
+    # Apps modulares
+    'core',
+    'users',
+    'investments',
+    'payments',
+    'financial',
+    'notifications',
+    'referrals',
+    'audit',
+    # App legado (temporariamente desabilitado para migração)
+    # 'api',
 ]
 
 MIDDLEWARE = [
@@ -38,6 +80,17 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    # Middlewares customizados para modularização
+    'core.middleware.DynamicHeadersMiddleware',
+    'core.middleware.RequestLoggingMiddleware',
+    'core.middleware.FeatureToggleMiddleware',
+    # Middlewares de segurança para sistema financeiro
+    'core.middleware.SecurityMiddleware',
+    'core.middleware.AuthenticationLoggingMiddleware',
+    # Middlewares de auditoria
+    'audit.middleware.AuditMiddleware',
+    'audit.middleware.RequestTimeMiddleware',
+    'audit.middleware.SecurityHeadersMiddleware',
 ]
 
 ROOT_URLCONF = 'config.urls'
@@ -66,9 +119,14 @@ DATABASES = {
       )
 }
 
-AUTH_USER_MODEL = 'api.User'
+AUTH_USER_MODEL = 'users.User'
 
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', cast=Csv())
+# Adicionar testserver para testes
+ALLOWED_HOSTS.append('testserver')
+ALLOWED_HOSTS.append('localhost')
+ALLOWED_HOSTS.append('127.0.0.1')
+
 CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', cast=Csv())
 CORS_ALLOW_CREDENTIALS = True
 CSRF_TRUSTED_ORIGINS = config('CSRF_TRUSTED_ORIGINS', cast=Csv())
@@ -76,14 +134,26 @@ CSRF_TRUSTED_ORIGINS = config('CSRF_TRUSTED_ORIGINS', cast=Csv())
 SESSION_COOKIE_DOMAIN = config('COOKIE_DOMAIN')
 CSRF_COOKIE_DOMAIN = config('COOKIE_DOMAIN')
 
+# Configurações de segurança para cookies JWT
 SESSION_COOKIE_SECURE = config('COOKIE_SECURE', cast=bool)
 CSRF_COOKIE_SECURE = config('COOKIE_SECURE', cast=bool)
-SESSION_COOKIE_SAMESITE = config('COOKIE_SAMESITE', default='None')
-CSRF_COOKIE_SAMESITE = config('COOKIE_SAMESITE', default='None')
+SESSION_COOKIE_SAMESITE = config('COOKIE_SAMESITE', default='Strict')
+CSRF_COOKIE_SAMESITE = config('COOKIE_SAMESITE', default='Strict')
+
+# Configurações extras de segurança para sistema financeiro
+SESSION_COOKIE_HTTPONLY = True
+CSRF_COOKIE_HTTPONLY = True
+SESSION_EXPIRE_AT_BROWSER_CLOSE = True
+SESSION_COOKIE_AGE = 15 * 60  # 15 minutos (mesmo que access token)
+
+# Configurações de CORS mais restritivas para sistema financeiro
+CORS_ALLOW_ALL_ORIGINS = False
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOWED_ORIGINS_REGEXES = []
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
-        'api.authentication.CookieJWTAuthentication',
+        'core.authentication.SecureCookieJWTAuthentication',  # Autenticação segura via cookies
     ),
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
@@ -94,6 +164,16 @@ REST_FRAMEWORK = {
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=15),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
+    'UPDATE_LAST_LOGIN': True,
+    'ALGORITHM': 'HS256',
+    'SIGNING_KEY': SECRET_KEY,
+    'VERIFYING_KEY': None,
+    'AUTH_HEADER_TYPES': ('Bearer',),
+    'USER_ID_FIELD': 'id',
+    'USER_ID_CLAIM': 'user_id',
+    'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.AccessToken',),
 }
 
 STATIC_ROOT = BASE_DIR / "staticfiles"
@@ -114,7 +194,7 @@ CONNECTPAY_API_SECRET = config('CONNECTPAY_API_SECRET')
 if not CONNECTPAY_API_SECRET:
     print("ALERTA: CONNECTPAY_API_SECRET não definida como variável de ambiente.")
 
-CONNECTPAY_WEBHOOK_BASE_URL = config('CONNECTPAY_WEBHOOK_BASE_URL', default="http://localhost:3333")
+CONNECTPAY_WEBHOOK_BASE_URL = config('CONNECTPAY_WEBHOOK_BASE_URL', default="http://localhost:8000")
 CONNECTPAY_BENEFICIARY_NAME = config('CONNECTPAY_BENEFICIARY_NAME', default="Nome da Sua Empresa Hoomoon")
 CONNECTPAY_WEBHOOK_TOKEN = config('CONNECTPAY_WEBHOOK_TOKEN', default=None)
 
@@ -165,12 +245,46 @@ LOGGING = {
             'level': 'ERROR',
             'propagate': False,
         },
-        'api': { # Logger da sua app 'api'
+        'api': { # Logger da app 'api' (legado)
             'handlers': ['console', 'file_app'],
             'level': API_APP_LOG_LEVEL, # Controlado pela variável
             'propagate': False,
         },
-        # Adicione loggers para outras apps suas aqui, se necessário
+        'users': { # Logger da app 'users'
+            'handlers': ['console', 'file_app'],
+            'level': API_APP_LOG_LEVEL, # Controlado pela variável
+            'propagate': False,
+        },
+        'investments': { # Logger da app 'investments'
+            'handlers': ['console', 'file_app'],
+            'level': API_APP_LOG_LEVEL, # Controlado pela variável
+            'propagate': False,
+        },
+        'payments': { # Logger da app 'payments'
+            'handlers': ['console', 'file_app'],
+            'level': API_APP_LOG_LEVEL, # Controlado pela variável
+            'propagate': False,
+        },
+        'financial': { # Logger da app 'financial'
+            'handlers': ['console', 'file_app'],
+            'level': API_APP_LOG_LEVEL, # Controlado pela variável
+            'propagate': False,
+        },
+        'notifications': { # Logger da app 'notifications'
+            'handlers': ['console', 'file_app'],
+            'level': API_APP_LOG_LEVEL, # Controlado pela variável
+            'propagate': False,
+        },
+        'referrals': { # Logger da app 'referrals'
+            'handlers': ['console', 'file_app'],
+            'level': API_APP_LOG_LEVEL, # Controlado pela variável
+            'propagate': False,
+        },
+        'core': { # Logger da app 'core'
+            'handlers': ['console', 'file_app'],
+            'level': API_APP_LOG_LEVEL, # Controlado pela variável
+            'propagate': False,
+        },
     },
     'root': { # Logger raiz - pega o que não foi especificado acima
         'handlers': ['console', 'file_app'], # Em produção, talvez só 'file_app'
